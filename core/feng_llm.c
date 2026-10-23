@@ -1,6 +1,13 @@
 /* Transformer forward pass for the feng-30m (Qwen3 architecture, MHA, tied head). */
 #include "feng.h"
 
+#ifdef FENG_PHONE
+#include "feng_phone.h"   /* FENG_PHONE_MAX_CTX / 线程池 / NEON 开关 */
+#if FENG_PHONE_NEON
+#include "feng_neon.h"    /* q2 注意力的 NEON 内核（K 打分 / V 累加） */
+#endif
+#endif
+
 #if defined(FENG_USE_CUDA)
 #include "feng_cuda.h"
 #endif
@@ -18,6 +25,11 @@ unsigned long long g_prof_cycles[3];    /* K / softmax / V，单位 CPU 周期 *
 /* 与 feng_quant.c::f16_to_f32 完全同算法的本地内联版：注意力内层每个 block
  * 都要转一次 scale，走外部函数（~25 条指令/次、还有调用开销）在长上下文里
  * 被放大成主要开销；内联后只剩位运算。数值逐位一致。 */
+/* 手机端 NEON 分支不走这个内联（kernel 内部自己转 scale），标量后端才用；
+ * 加 unused 属性避免 aarch64 -Wall 报未使用。 */
+#if defined(__GNUC__)
+__attribute__((unused))
+#endif
 static inline float f16_to_f32_local(uint16_t h)
 {
     uint32_t sign = (uint32_t)(h >> 15) & 1u;
@@ -70,10 +82,15 @@ static void f16_to_f32_vec(const uint16_t *src, float *dst, int n)
  * 板端 2048 ctx = 2×16KB，PC 32k = 2×128KB，都在 .bss 里可接受。
  * 设 1 可退回单核（A/B 与调试）。 */
 #ifndef FENG_ATTN_PARTS
-#define FENG_ATTN_PARTS 2
+#ifdef FENG_PHONE
+#define FENG_ATTN_PARTS 4            /* 手机 4~8 核：按 head 切给线程池 */
+#else
+#define FENG_ATTN_PARTS 2            /* 板端 S3 双核 */
 #endif
-#if FENG_ATTN_PARTS < 1 || FENG_ATTN_PARTS > 2
-#error "FENG_ATTN_PARTS must be 1 or 2 (S3 has two cores)"
+#endif
+#if FENG_ATTN_PARTS < 1 || FENG_ATTN_PARTS > 8 || \
+    (FENG_ATTN_PARTS > 2 && !defined(FENG_PHONE))
+#error "FENG_ATTN_PARTS: 板端 1..2，手机 1..8"
 #endif
 
 /* scratch buffers live in .bss, not on the task stack (the S3's main stack is small).
@@ -253,6 +270,16 @@ static void q2_attn_range(void *arg, int part, int nparts)
 #if FENG_ATTN_PROF
         const unsigned pc0 = (unsigned)esp_cpu_get_cycle_count();
 #endif
+#if FENG_PHONE_NEON && FENG_Q2_LUT
+        /* 手机端：一条 NEON 内核算完整个 t 区间（每 (t,blk) 两条 4 路 FMA 链 +
+         * 水平归约）。累加分组与标量链不同，结果在 fp32 噪声级（~1e-7 相对）；
+         * 并行来自上层按 head 切分，所以这里不再嵌套线程。 */
+        feng_neon_q2_attn_k(krow, ksrow, qh, scores, 0, c->pos + 1,
+                            c->qb, c->nb, c->scale,
+                            (const float (*)[4])g_q2_lut);
+        for (int t = 0; t <= c->pos; t++)
+            if (scores[t] > maxs) maxs = scores[t];
+#else
 #if FENG_Q2_LUT && FENG_Q2_PAIR
         {
             int t = 0;
@@ -335,6 +362,7 @@ static void q2_attn_range(void *arg, int part, int nparts)
             if (s > maxs) maxs = s;
         }
 #endif
+#endif  /* FENG_PHONE_NEON && FENG_Q2_LUT */
 #if FENG_ATTN_PROF
         {
             const unsigned pc1 = (unsigned)esp_cpu_get_cycle_count();
@@ -366,6 +394,14 @@ static void q2_attn_range(void *arg, int part, int nparts)
             const uint8_t *vrow = (const uint8_t *)c->kv->v_cache
                                   + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->qb;
             const uint16_t *vsrow = c->kv->v_scale + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->nb;
+#if FENG_PHONE_NEON && FENG_Q2_LUT
+            /* 手机端：8 维一块，乘法分组 (st*lu)*sv 与标量版逐字相同、每个 d 按 t
+             * 递增 —— 与标量路径逐位一致。 */
+            for (int blk = 0; blk < c->nb; blk++)
+                feng_neon_q2_attn_v(vrow, vsrow, scores, vacc, c->pos + 1,
+                                    c->qb, c->nb, blk,
+                                    (const float (*)[4])g_q2_lut);
+#else
 #if FENG_Q2_LUT && FENG_Q2_PAIR
             {
                 int t = 0;
@@ -452,6 +488,7 @@ static void q2_attn_range(void *arg, int part, int nparts)
 #endif
             }
 #endif
+#endif  /* FENG_PHONE_NEON && FENG_Q2_LUT */
             for (int d = 0; d < c->hd; d++) c->attn[hh * c->hd + d] = vacc[d] * inv;
 #if FENG_ATTN_PROF
             g_prof_cycles[2] += (unsigned long long)((unsigned)esp_cpu_get_cycle_count() - pv0);

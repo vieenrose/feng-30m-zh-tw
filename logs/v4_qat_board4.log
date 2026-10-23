@@ -1,27 +1,0 @@
-[14:06:44] 样本：QAT 数据 38298 + 多轮/身份 380 = 38678 条
-[14:07:00] 可用样本 38678，平均长度 122
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 1649.69it/s]
-[14:07:00] KV-QAT hooks installed: K (post-RoPE) + V (v_proj out), q2 block8 STE
-[14:07:00] W-QAT：78 个权重矩阵 + embedding 按 Q4 block64（fp16 scale）STE 前向
-[14:07:08] step 25/4833 loss 4.0723 lr 6.00e-06 gnorm 2.70 0.1min
-[14:07:18] step 50/4833 loss 4.1362 lr 6.00e-06 gnorm 2.22 0.3min
-[14:07:26] step 75/4833 loss 4.0937 lr 6.00e-06 gnorm 2.43 0.4min
-[14:07:34] step 100/4833 loss 3.9506 lr 6.00e-06 gnorm 3.01 0.6min
-[14:07:41] step 125/4833 loss 4.2319 lr 5.99e-06 gnorm 2.25 0.7min
-[14:07:50] step 150/4833 loss 3.7731 lr 5.99e-06 gnorm 2.69 0.8min
-[14:07:58] step 175/4833 loss 4.0393 lr 5.99e-06 gnorm 3.28 1.0min
-[14:08:06] step 200/4833 loss 4.0909 lr 5.98e-06 gnorm 2.54 1.1min
-[14:08:14] step 225/4833 loss 4.2472 lr 5.97e-06 gnorm 2.36 1.2min
-[14:08:24] step 250/4833 loss 4.1032 lr 5.97e-06 gnorm 2.37 1.4min
-[14:08:30] step 275/4833 loss 3.9525 lr 5.96e-06 gnorm 2.27 1.5min
-[14:08:37] step 300/4833 loss 3.8766 lr 5.95e-06 gnorm 2.21 1.6min
-[14:08:47] step 325/4833 loss 4.1113 lr 5.95e-06 gnorm 2.16 1.8min
-[14:08:56] step 350/4833 loss 3.8893 lr 5.94e-06 gnorm 2.21 1.9min
-[14:09:03] step 375/4833 loss 3.8295 lr 5.93e-06 gnorm 2.32 2.0min
-[14:09:13] step 400/4833 loss 3.5793 lr 5.92e-06 gnorm 2.24 2.2min
-[14:09:20] step 425/4833 loss 3.7557 lr 5.90e-06 gnorm 2.57 2.3min
-[14:09:29] step 450/4833 loss 3.9722 lr 5.89e-06 gnorm 2.40 2.5min
-[14:09:37] step 475/4833 loss 3.5434 lr 5.88e-06 gnorm 2.64 2.6min
-[14:09:45] step 500/4833 loss 3.8932 lr 5.87e-06 gnorm 2.20 2.7min
-[14:09:54] step 525/4833 loss 3.9369 lr 5.85e-06 gnorm 2.03 2.9min
-[14:10:00] step 550/4833 loss 3.5515 lr 5.84e-06 gnorm 2.67 3.0min

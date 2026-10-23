@@ -49,6 +49,22 @@ void feng_neon_fp16_gemv(const uint16_t *w, const float *x, float *y,
 void feng_neon_q4_gemv(const uint8_t *base, const int8_t *xq, const float *xscale,
                        float *y, int r0, int r1, int n_in);
 
+
+/* q2 KV 注意力的 NEON 内核（手机端 4 核分块里的每块）。
+ * K 打分：scores[t] = (Σ_blk sk * Σ_{d in blk} qh[d] * deq(2bit)) * scale，
+ *   每个 (t, blk) 两条 4 路 FMA 链 + 水平归约——累加分组与标量版不同，
+ *   结果在 fp32 噪声级（~1e-7 相对）。
+ * V 累加：只算 blk 指定的 8 维块，每个 d 按 t 递增累加、乘法分组与标量版
+ *   完全相同（(st*lu)*sv），因此与标量路径**逐位一致**。
+ * lut 是 256x4 的 2bit->float 查表（由 feng_llm.c 的 g_q2_lut 传入）。 */
+void feng_neon_q2_attn_k(const uint8_t *krow, const uint16_t *ksrow,
+                         const float *qh, float *scores,
+                         int t0, int t1, int qb, int nb, float scale,
+                         const float (*lut)[4]);
+void feng_neon_q2_attn_v(const uint8_t *vrow, const uint16_t *vsrow,
+                         const float *scores, float *vacc,
+                         int total, int qb, int nb, int blk,
+                         const float (*lut)[4]);
 #ifdef __cplusplus
 }
 #endif

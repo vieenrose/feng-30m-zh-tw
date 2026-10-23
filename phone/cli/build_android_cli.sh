@@ -16,7 +16,10 @@ if W="$(cd "$HERE" && pwd -W 2>/dev/null)" && [ -n "$W" ]; then
     R="$(cd "$ROOT" && pwd -W 2>/dev/null || true)"
     [ -n "$R" ] && ROOT="$R"
 fi
-ENG="$HERE/../engine"
+# 引擎主体直接用 core/（三端同一份源码）；phone/engine 只放手机独有的
+# 平台层（feng_phone.c）与 NEON 内核（feng_neon.c）。
+CORE="$ROOT/core"
+PHONE="$HERE/../engine"
 SUITE_DIR="$ROOT/pc"
 
 # ---- 找 NDK ----
@@ -43,24 +46,25 @@ CXX="$BIN/aarch64-linux-android$API-clang++"
 
 OUT="${OUT:-$HERE/build_android}"
 KVFLAGS="-DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8"   # 与板端发布配置一致
-CFLAGS="-std=c23 -O2 -pthread -I$ENG $KVFLAGS -Wall"
-CXXFLAGS="-std=c++23 -fno-exceptions -fno-rtti -fno-threadsafe-statics -O2 -pthread -I$ENG $KVFLAGS"
+CFLAGS="-std=c23 -O2 -pthread -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 -I$CORE -I$PHONE $KVFLAGS -Wall"
+CXXFLAGS="-std=c++23 -fno-exceptions -fno-rtti -fno-threadsafe-statics -O2 -pthread -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 -I$CORE -I$PHONE $KVFLAGS"
 
-HOT="feng_llm.c feng_quant.c feng_smp.c feng_sample.c feng_phone.c feng_neon.c"
-COLD="feng_model.c feng_tokenizer.c feng_calc.c feng_tools.c feng_memory.c"
+HOT="$CORE/feng_llm.c $CORE/feng_quant.c $CORE/feng_smp.c $CORE/feng_sample.c"
+HOT="$HOT $PHONE/feng_phone.c $PHONE/feng_neon.c"
+COLD="$CORE/feng_model.c $CORE/feng_tokenizer.c $CORE/feng_calc.c $CORE/feng_tools.c $CORE/feng_memory.c"
 
 mkdir -p "$OUT/obj"
 echo "== NDK=$NDK ($HOST) OUT=$OUT"
 OBJS=""
 for f in $HOT; do
-    echo "   CC $f  [-O2]"
-    "$CC" $CFLAGS -c "$ENG/$f" -o "$OUT/obj/${f%.c}.o"
-    OBJS="$OBJS $OUT/obj/${f%.c}.o"
+    echo "   CC $(basename "$f")  [-O2]"
+    "$CC" $CFLAGS -c "$f" -o "$OUT/obj/$(basename "${f%.c}").o"
+    OBJS="$OBJS $OUT/obj/$(basename "${f%.c}").o"
 done
 for f in $COLD; do
-    echo "   CC $f  [-Os]"
-    "$CC" $CFLAGS -Os -c "$ENG/$f" -o "$OUT/obj/${f%.c}.o"
-    OBJS="$OBJS $OUT/obj/${f%.c}.o"
+    echo "   CC $(basename "$f")  [-Os]"
+    "$CC" $CFLAGS -Os -c "$f" -o "$OUT/obj/$(basename "${f%.c}").o"
+    OBJS="$OBJS $OUT/obj/$(basename "${f%.c}").o"
 done
 
 echo "   LD phone_chat / pc_kv_suite_phone / pc_mt_suite_phone"

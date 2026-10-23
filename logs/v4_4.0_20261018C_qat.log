@@ -1,35 +1,0 @@
-[15:48:07] 样本：QAT 数据 440 + 多轮/身份 500 = 940 条
-[15:48:07] 可用样本 940，平均长度 66
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 2259.74it/s]
-[15:48:07] KV-QAT hooks installed: K (post-RoPE) + V (v_proj out), q2 block8 STE
-[15:48:07] W-QAT：78 个权重矩阵 + embedding 按 Q4 block64（fp16 scale）STE 前向
-[15:48:11] step 25/116 loss 2.9257 lr 1.96e-06 gnorm 6.84 0.1min
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.79it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.79it/s]
-[15:48:13] saved rolling -> v4\4.0-20261018C\rolling\step50
-[15:48:13] step 50/116 loss 4.3655 lr 1.52e-06 gnorm 5.65 0.1min
-[15:48:16] step 75/116 loss 4.1035 lr 8.38e-07 gnorm 5.72 0.2min
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 14.07it/s]
-[15:48:19] saved rolling -> v4\4.0-20261018C\rolling\step100
-[15:48:19] step 100/116 loss 3.8717 lr 3.09e-07 gnorm 5.29 0.2min
-[15:48:21] step 116/116 loss 4.0347 lr 2.00e-07 gnorm 4.75 0.2min
-[15:48:21] === 长文 QAT 4096: 100 窗口 | 2x2 | 25 步 | lr 2e-06 ===
-[15:48:26] [longQAT4096] step 10/25 loss 2.5613 lr 1.38e-06 gnorm 57.28 0.3min
-[15:48:30] [longQAT4096] step 20/25 loss 0.4283 lr 3.72e-07 gnorm 30.38 0.4min
-[15:48:33] [longQAT4096] step 25/25 loss 1.3759 lr 2.00e-07 gnorm 41.48 0.4min
-[15:48:33] === 长文 QAT 8192: 60 窗口 | 1x2 | 30 步 | lr 2e-06 ===
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 13.59it/s]
-[15:48:39] saved rolling -> v4\4.0-20261018C\rolling\step150
-[15:48:39] [longQAT8192] step 10/30 loss 4.2339 lr 1.55e-06 gnorm 72.06 0.5min
-[15:48:46] [longQAT8192] step 20/30 loss 0.7074 lr 6.50e-07 gnorm 58.28 0.6min
-[15:48:52] [longQAT8192] step 30/30 loss 0.6973 lr 2.00e-07 gnorm 45.82 0.8min
-[15:48:52] === 长文 QAT 16384: 40 窗口 | 1x2 | 20 步 | lr 2e-06 ===
-[15:49:12] [longQAT16384] step 10/20 loss 2.8287 lr 1.10e-06 gnorm 124.43 1.1min
-[15:49:32] [longQAT16384] step 20/20 loss 1.4826 lr 2.00e-07 gnorm 117.62 1.4min
-[15:49:32] === 长文 QAT 32768: 60 窗口 | 1x2 | 30 步 | lr 2e-06 ===
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.89it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.83it/s]
-[15:50:28] saved rolling -> v4\4.0-20261018C\rolling\step200
-[15:50:34] [longQAT32768] step 10/30 loss 3.5785 lr 1.55e-06 gnorm 117.13 2.5min
-[15:51:36] [longQAT32768] step 20/30 loss 4.9308 lr 6.50e-07 gnorm 135.68 3.5min
-[15:52:39] [longQAT32768] step 30/30 loss 2.3665 lr 2.00e-07 gnorm 110.59 4.5min
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.68it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.68it/s]
-[15:52:39] saved -> v4\4.0-20261018C（loss 4.0347）

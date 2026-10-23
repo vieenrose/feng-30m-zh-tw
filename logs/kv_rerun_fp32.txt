@@ -1,2 +1,0 @@
-mode=fp32  ctx=2048  kv=77.00 MB  prompt_tokens=323  gen=64
-OUT: 夜里下了一场小雨，第二天早上，石阶上还留着浅浅的水痕。

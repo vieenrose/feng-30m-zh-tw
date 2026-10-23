@@ -4,6 +4,13 @@
  */
 #include "feng.h"
 
+#ifdef FENG_PHONE
+#include "feng_phone.h"          /* 手机端：NEON 运行期开关、线程池 */
+#if FENG_PHONE_NEON
+#include "feng_neon.h"           /* aarch64 int8 点积（SDOT）的 Q4 GEMV 内核 */
+#endif
+#endif
+
 #if defined(FENG_USE_CUDA)
 #include "feng_cuda.h"
 #endif
@@ -24,7 +31,7 @@
 static float s_q4_lut[256][2];
 static int s_q4_lut_ready;
 
-#if FENG_GEMV_A8 || FENG_GEMV_PIE
+#if FENG_GEMV_A8 || FENG_GEMV_PIE || FENG_PHONE_NEON
 /* A8/PIE 的激活量化缓冲区：每个 GEMV 调用准备一次（prepare），行循环只读。
  * 推理是单线程的，两个 SMP worker 都在 prepare 之后并发读同一份数据。 */
 #define A8_MAX_IN 1024
@@ -208,6 +215,15 @@ FENG_HOT static void gemv_range_cpu(const void *tensor, uint32_t dtype, const fl
     if (r1 <= r0 || n_in <= 0) return;
     if (dtype == FENG_DT_FP16) {
         const uint16_t *w = (const uint16_t *)tensor;
+#if FENG_PHONE_NEON
+        /* aarch64 且有 FP16 向量运算：vcvt_f32_f16 + vfmaq_f32。
+         * 不支持的老核心、或 --neon 0，都自动落到下面的标量循环。
+         * 两条路径**不逐位一致**（累加顺序不同），验收看 argmax 与 32 题判定。 */
+        if (feng_phone_neon_on() && feng_neon_fp16_ok()) {
+            feng_neon_fp16_gemv((const uint16_t *)tensor, x, y, r0, r1, n_in);
+            return;
+        }
+#endif
 #if defined(FENG_USE_OMP)
 #pragma omp parallel for schedule(static) if (r1 - r0 >= 128)
 #endif
@@ -239,6 +255,18 @@ FENG_HOT static void gemv_range_cpu(const void *tensor, uint32_t dtype, const fl
     const int n_blocks = n_in / QK;
     const size_t row_bytes = (size_t)n_blocks * (2 + 32);
     q4_lut_init();
+#if FENG_PHONE_NEON
+    /* 手机端 NEON 内核（ARMv8.2 dotprod）：激活在 feng_gemv_a8_prepare 里量化成 int8，
+     * 权重的 4-bit nibble 用 vqtbl1q_s8 映射成 int8，一条 vdotq_s32 做 16 次乘加。
+     * 累加式与下面的标量 A8 路径**完全相同**（acc += (float)dot * (sw*sx)，同块顺序），
+     * 整数点积又是精确的，所以两条路径结果逐位一致——可以在 x86 上用标量 A8 先验数值，
+     * 再用 aarch64 跑同一份套件确认。没有 dotprod 的老核心（A53/A72）自动回退标量。 */
+    if (feng_phone_neon_on() && feng_neon_sdot_ok() &&
+        s_a8_x == x && s_a8_nin == n_in) {
+        feng_neon_q4_gemv(base, s_a8_xq, s_a8_xscale, y, r0, r1, n_in);
+        return;
+    }
+#endif
 #if FENG_GEMV_PIE
     /* PIE 内核：激活 int16（prepare 阶段已算好）+ 权重 LUT 展开 + vmulas.s16。
      * 整数点积与 A8 路径完全同源（同样的 xq/scale），结果应逐位一致。 */
@@ -388,9 +416,9 @@ void feng_gemv3(const void *w0, const void *w1, const void *w2, uint32_t dtype,
         return;
     }
 #endif
-    /* 板端：逐次 feng_gemv_par（保留双核）；PC：直接走 CPU 实现，避免依赖 feng_smp
-     * （pc_sample_test 这类只链 feng_quant.cpp 的单测不需要 feng_smp）。 */
-#if defined(ESP_PLATFORM)
+    /* 板端 / 手机：逐次 feng_gemv_par（各自的多核实现）；PC：直接走 CPU 实现，
+     * 避免依赖 feng_smp（pc_sample_test 这类只链 feng_quant 的单测不需要 feng_smp）。 */
+#if defined(ESP_PLATFORM) || defined(FENG_PHONE)
     if (w0) feng_gemv_par(w0, dtype, x, y0, n_out0, n_in);
     if (w1) feng_gemv_par(w1, dtype, x, y1, n_out1, n_in);
     if (w2) feng_gemv_par(w2, dtype, x, y2, n_out2, n_in);

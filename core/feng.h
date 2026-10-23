@@ -47,6 +47,11 @@ extern "C" {
 #if (FENG_KV_INT8 + FENG_KV_Q2 + FENG_KV_FP16) > 1
 #error "FENG_KV_INT8 / FENG_KV_Q2 / FENG_KV_FP16 只能选一个"
 #endif
+/* 手机端平台层：FENG_PHONE_MAX_CTX（上下文上限）、NEON 开关、线程池声明。
+ * 板端 / PC 不定义 FENG_PHONE，这一整块不参与编译。 */
+#ifdef FENG_PHONE
+#include "feng_phone.h"
+#endif
 /* q2 注意力内层用字节 LUT 取代移位/掩码/整数转浮点（数值与原式完全一致，结果逐位不变）。
  * 默认开；-DFENG_Q2_LUT=0 可切回原实现做 A/B。 */
 #ifndef FENG_Q2_LUT
@@ -110,7 +115,11 @@ enum {
  * FENG_MAX_SCORES 默认 4096：板端 2048、PC/手机 4096 足够；PC 要跑 32k
  * 可以在构建时 -DFENG_MAX_SCORES=32768。 */
 #ifndef FENG_MAX_SCORES
+#ifdef FENG_PHONE
+#define FENG_MAX_SCORES FENG_PHONE_MAX_CTX   /* 手机：与上下文上限一致 */
+#else
 #define FENG_MAX_SCORES 4096
+#endif
 #endif
 #ifndef FENG_MAX_HEAD_DIM
 #define FENG_MAX_HEAD_DIM 128            /* q2 V 段 vacc[] 与 rope 表的上限 */

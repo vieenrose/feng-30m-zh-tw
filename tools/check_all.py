@@ -138,8 +138,9 @@ def main() -> int:
                 print("\n[重试] MSVC 路径不可用（缺 vswhere），自动改用 -MinGW")
                 ok = run("PC 引擎两趟构建（-MinGW 重试）", base_args + ["-MinGW"])
             results.append(("build_pc", ok))
-    results.append(("phone_drift", run("手机端引擎与 core/ 漂移检查",
-                                       [py, "phone/tools/check_drift.py"])))
+    results.append(("phone_single_source", run(
+        "单一源码守卫（phone/engine 不得出现引擎副本）",
+        [py, "phone/tools/check_single_source.py"])))
 
     exp = Path(args.model_export)
     if not (exp / "model.bin").exists():

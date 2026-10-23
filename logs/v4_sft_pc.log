@@ -1,45 +1,0 @@
-训练样本 33787 条
-有效样本 33787 条（编码 6.5s，平均 96 个 loss token）
-验证样本 689 条
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 2089.64it/s]
-每轮 1407 批，共 703 步（accum=2，等效 batch 48）
-  step 20/703 ep1 loss=4.5842 lr=8.00e-06 gn=3.15 0.1min peak=2.56GiB
-  step 40/703 ep1 loss=4.5205 lr=1.60e-05 gn=1.20 1.8min peak=12.03GiB
-  step 60/703 ep1 loss=4.4753 lr=2.00e-05 gn=1.09 5.6min peak=12.91GiB
-  step 80/703 ep1 loss=4.3386 lr=1.99e-05 gn=2.13 6.5min peak=12.91GiB
-  step 100/703 ep1 loss=3.7517 lr=1.97e-05 gn=2.39 6.7min peak=12.91GiB
-  step 120/703 ep1 loss=4.0031 lr=1.95e-05 gn=1.39 7.8min peak=12.91GiB
-  step 140/703 ep1 loss=3.9599 lr=1.92e-05 gn=1.94 8.8min peak=12.91GiB
-  step 160/703 ep1 loss=4.0702 lr=1.88e-05 gn=1.59 9.0min peak=12.91GiB
-  step 180/703 ep1 loss=3.9971 lr=1.83e-05 gn=1.95 9.2min peak=12.91GiB
-  step 200/703 ep1 loss=4.0934 lr=1.78e-05 gn=1.07 10.6min peak=12.91GiB
-  step 220/703 ep1 loss=3.2680 lr=1.72e-05 gn=2.76 11.9min peak=12.91GiB
-  step 240/703 ep1 loss=3.5727 lr=1.65e-05 gn=1.24 13.8min peak=12.91GiB
-  step 260/703 ep1 loss=3.8003 lr=1.58e-05 gn=2.00 14.0min peak=12.91GiB
-  step 280/703 ep1 loss=3.7749 lr=1.50e-05 gn=1.82 14.1min peak=12.91GiB
-  step 300/703 ep1 loss=3.8904 lr=1.42e-05 gn=1.71 14.4min peak=12.91GiB
-  step 320/703 ep1 loss=4.0377 lr=1.34e-05 gn=1.11 16.8min peak=12.91GiB
-  step 340/703 ep1 loss=4.0375 lr=1.26e-05 gn=1.43 17.5min peak=12.91GiB
-  step 360/703 ep1 loss=3.9019 lr=1.17e-05 gn=2.48 19.1min peak=12.91GiB
-  step 380/703 ep1 loss=3.6825 lr=1.08e-05 gn=2.09 19.3min peak=12.91GiB
-  step 400/703 ep1 loss=3.8651 lr=9.98e-06 gn=1.17 21.2min peak=12.91GiB
-  step 420/703 ep1 loss=3.3822 lr=9.13e-06 gn=2.36 21.8min peak=12.91GiB
-  step 440/703 ep1 loss=3.2775 lr=8.29e-06 gn=1.74 23.1min peak=12.91GiB
-  step 460/703 ep1 loss=3.6657 lr=7.48e-06 gn=1.55 25.7min peak=12.91GiB
-  step 480/703 ep1 loss=3.8352 lr=6.70e-06 gn=1.40 27.9min peak=12.91GiB
-  step 500/703 ep1 loss=3.9520 lr=5.96e-06 gn=1.69 30.3min peak=12.91GiB
-  step 520/703 ep1 loss=3.9435 lr=5.27e-06 gn=1.84 30.5min peak=12.91GiB
-  step 540/703 ep1 loss=3.9356 lr=4.63e-06 gn=1.48 31.8min peak=12.91GiB
-  step 560/703 ep1 loss=3.6747 lr=4.05e-06 gn=2.42 32.8min peak=12.91GiB
-  step 580/703 ep1 loss=3.3659 lr=3.53e-06 gn=2.54 32.9min peak=12.91GiB
-  step 600/703 ep1 loss=3.1915 lr=3.08e-06 gn=2.02 33.0min peak=12.91GiB
-  step 620/703 ep1 loss=3.6680 lr=2.71e-06 gn=1.21 34.7min peak=12.91GiB
-  step 640/703 ep1 loss=2.7229 lr=2.41e-06 gn=4.03 35.6min peak=12.91GiB
-  step 660/703 ep1 loss=3.4148 lr=2.19e-06 gn=1.56 35.8min peak=12.91GiB
-  step 680/703 ep1 loss=3.7103 lr=2.06e-06 gn=1.56 36.1min peak=12.91GiB
-  step 700/703 ep1 loss=3.9262 lr=2.00e-06 gn=0.96 38.5min peak=12.91GiB
-  step 703/703 ep1 loss=3.9457 lr=2.00e-06 gn=0.98 39.0min peak=12.91GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.64it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.64it/s]
-
-完成：703 步 / 40.5 min / 峰值 12.91 GiB / val_loss 3.9643
-权重 -> v4\sft_pc\final

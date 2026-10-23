@@ -1,6 +1,0 @@
-[C vs torch(Q4)] max|diff|=0.0000 mean=0.00000 argmax C=5331 torch=5331
-
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]
-Loading weights: 100%|��������������������| 123/123 [00:00<00:00, 2240.41it/s]
-[torch(Q4) vs torch(fp32)] max|diff|=2.6604 mean=0.45821   <- pure quantization error
-[C vs torch(fp32)] max|diff|=2.6604 mean=0.45821

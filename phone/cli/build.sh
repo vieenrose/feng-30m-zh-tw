@@ -29,7 +29,10 @@ if W="$(cd "$HERE" && pwd -W 2>/dev/null)" && [ -n "$W" ]; then
     R="$(cd "$ROOT" && pwd -W 2>/dev/null || true)"
     [ -n "$R" ] && ROOT="$R"
 fi
-ENG="$HERE/../engine"
+# 引擎主体直接用 core/（板端 / PC / 手机编同一份源码）；phone/engine 只放
+# 手机独有的平台层（feng_phone.c）与 NEON 内核（feng_neon.c）。
+CORE="$ROOT/core"
+PHONE="$HERE/../engine"
 SUITE_DIR="$ROOT/pc"
 
 # -std=c23 需要 gcc 14+ / clang 18+。Ubuntu 24.04 的默认 cc 是 gcc-13（只认 -std=c2x），
@@ -69,12 +72,13 @@ esac
 #   EXTRA=-DFENG_PHONE_MAX_CTX=32768 ./build.sh
 # 默认值写在 phone/engine/feng_phone.h（4096），那是**编译期常量**，不是硬件限制。
 EXTRA="${EXTRA:-}"
-CFLAGS="-std=c23 -pthread -I$ENG $KVFLAGS -Wall $EXTRA"
-CXXFLAGS="-std=c++23 -pthread -I$ENG $KVFLAGS $EXTRA"
+CFLAGS="-std=c23 -pthread -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 -I$CORE -I$PHONE $KVFLAGS -Wall $EXTRA"
+CXXFLAGS="-std=c++23 -pthread -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 -I$CORE -I$PHONE $KVFLAGS $EXTRA"
 
-# 热点：每 token 内层循环所在（与 main/CMakeLists.txt 的分组一致）+ 手机端新增的三个文件
-HOT="feng_llm.c feng_quant.c feng_smp.c feng_sample.c feng_phone.c feng_neon.c"
-COLD="feng_model.c feng_tokenizer.c feng_calc.c feng_tools.c feng_memory.c"
+# 热点：每 token 内层循环所在（与 main/CMakeLists.txt 的分组一致）
+HOT="$CORE/feng_llm.c $CORE/feng_quant.c $CORE/feng_smp.c $CORE/feng_sample.c"
+HOT="$HOT $PHONE/feng_phone.c $PHONE/feng_neon.c"
+COLD="$CORE/feng_model.c $CORE/feng_tokenizer.c $CORE/feng_calc.c $CORE/feng_tools.c $CORE/feng_memory.c"
 
 mkdir -p "$OUT/obj"
 
@@ -83,15 +87,15 @@ echo "== CC=$CC  OUT=$OUT"
 
 OBJS=""
 for f in $HOT; do
-    o="$OUT/obj/${f%.c}.o"
-    echo "   CC $f  [-O2]"
-    "$CC" $CFLAGS -O2 -c "$ENG/$f" -o "$o"
+    o="$OUT/obj/$(basename "${f%.c}").o"
+    echo "   CC $(basename "$f")  [-O2]"
+    "$CC" $CFLAGS -O2 -c "$f" -o "$o"
     OBJS="$OBJS $o"
 done
 for f in $COLD; do
-    o="$OUT/obj/${f%.c}.o"
-    echo "   CC $f  [-Os]"
-    "$CC" $CFLAGS -Os -c "$ENG/$f" -o "$o"
+    o="$OUT/obj/$(basename "${f%.c}").o"
+    echo "   CC $(basename "$f")  [-Os]"
+    "$CC" $CFLAGS -Os -c "$f" -o "$o"
     OBJS="$OBJS $o"
 done
 

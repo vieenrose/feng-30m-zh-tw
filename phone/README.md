@@ -7,7 +7,7 @@
 | **Termux CLI** | 在手机上原生编译的 `phone_chat`，命令行对话 + 基准 | 想在终端里用、想自己改/调参 |
 | **Android APK** | Kotlin + Jetpack Compose 界面，JNI 调同一个引擎 | 只是想装个 App 用 |
 
-两条路用的是**同一批源文件**（`phone/engine/`），不存在「CLI 一个引擎、App 另一个引擎」。
+两条路用的是**同一批源文件**（`core/` + `phone/engine/` 里的平台层），不存在「CLI 一个引擎、App 另一个引擎」。
 
 - 完全离线：APK 不申请任何权限，模型随包打进去；Termux 侧只读本地文件。
 - 四个 tool 全保留：算式、记忆、时间、随机数走引擎侧确定性回答，不交给模型硬算。
@@ -210,37 +210,33 @@ A8 带来的数值变化量级：与纯 fp32 路径比 `max|diff| = 1.683`，而
 
 ---
 
-## 4. 与板端引擎的分叉清单（改引擎前必读）
+## 4. 与板端的差异（改引擎前必读）
 
-`phone/engine/` 是 `board/main/` 的**派生副本**，板端文件一行未改。
-每个文件头部都标了来源，原版校验值在 `phone/engine/SOURCE.sha256`。
+**2026-10-23 起没有「手机端引擎副本」了。** 三端（板端 / PC / 手机）编**同一份**
+`core/*.c`，手机差异全部是 `-DFENG_PHONE=1` 的编译期分支。之前那份 18 个文件、
+4909 行的手工拷贝（`feng_llm.c` 分叉 458 行）已经删除——同步靠 `cp` 是持续 bug 源。
 
-手机端只改了四处，同步板端改动时照这张表处理：
+差异只有下面四处，都在 `core/` 里：
 
-| 文件 | 改了什么 | 为什么 |
+| 位置 | 手机端差异 | 为什么 |
 |---|---|---|
-| `feng_smp.c` | 整份重写：FreeRTOS 双核 → pthread 线程池（`feng_phone_parallel_for`），并新增 `feng_gemv3_par` | 手机有 4~8 核，板端那套只覆盖 2 核 |
-| `feng_quant.c` | ① NEON 内核分派；② `feng_gemv3` 改走 `feng_gemv3_par` | ② 是移植最容易踩的坑：原版非 ESP 分支直接调 `gemv_range_cpu`，会让 q/k/v 与 gate/up **绕开多线程**，提速少一大半 |
-| `feng_llm.c` | `g_scores[4096]` → `g_scores[FENG_PHONE_MAX_CTX]` | 原值把上下文硬上限钉死在 4096 |
-| `feng.h` | 加 `feng_gemv3_par` 声明 | 上面那条 |
+| `core/feng_smp.c` | `#elif defined(FENG_PHONE)`：pthread 线程池（`feng_phone_parallel_for`），`feng_par_run` 也接进池子 | 手机 4~8 核，板端那套 FreeRTOS 只覆盖 2 核 |
+| `core/feng_quant.c` | `#if FENG_PHONE_NEON`：Q4 sdot / fp16 NEON 内核分派；`feng_gemv3` 走并行路径 | 原版非 ESP 分支直接调 `gemv_range_cpu`，会让 q/k/v 与 gate/up **绕开多线程**，提速少一大半 |
+| `core/feng_llm.c` | `#if FENG_PHONE_NEON`：q2 注意力 K/V 的 NEON 内核；`FENG_ATTN_PARTS` 默认 4 | 长上下文里注意力占 prefill 的 76% |
+| `core/feng.h` | `#ifdef FENG_PHONE` 包含 `feng_phone.h`，`FENG_MAX_SCORES` 跟随 `FENG_PHONE_MAX_CTX` | 板端 4096 的 scores 上限会钉死手机上下文 |
 
-新增文件（板端没有）：`feng_phone.c` / `feng_neon.c` 及其头文件。
+手机独有模块（板端没有）：`feng_phone.c/h`（mmap 加载、时间源、线程池、NEON 开关）、
+`feng_neon.c/h`（aarch64 内核）。
 
-**同步配方**：先跑漂移检查，再逐文件看差异，只把「不属于上表四处」的改动搬过来：
+**守卫**：`python phone/tools/check_single_source.py` 会在 `phone/engine/` 里
+再次出现引擎副本时直接失败；CI 与 `tools/check_all.py` 都跑它。
+
+**改完怎么验**：`./build.sh` 编出来，与「板端原始引擎」对照逐字节比：
 
 ```bash
-python phone/tools/check_drift.py        # 哪些文件板端改了、手机端没跟
-python phone/tools/check_drift.py --write  # 同步完成后重建校验基准
-
-for f in feng_model feng_llm feng_quant feng_tokenizer feng_sample feng_calc feng_tools feng_memory; do
-  diff -u --strip-trailing-cr board/main/$f.c phone/engine/$f.c | head -40
-done
+./build_baseline.sh     # 用 core/ 不加 FENG_PHONE，产出对照组
+./verify.sh             # 单线程 / 4 线程 / NEON 关，与对照组逐字节比 + 21/21 + mem12
 ```
-
-`--strip-trailing-cr` 不能省：仓库里 CRLF 与 LF 混着（板端的 `feng_llm.c` 是 CRLF、
-`feng.h` 是 LF），不带这个参数会整份文件都报成「已改」，真正的改动反而被淹没。
-
----
 
 ## 5. 目录结构
 

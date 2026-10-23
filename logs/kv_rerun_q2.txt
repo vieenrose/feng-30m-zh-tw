@@ -1,2 +1,0 @@
-mode=q2  ctx=2048  kv=7.22 MB  prompt_tokens=323  gen=64
-OUT: 夜里下了一场小雨，小小子子在窗边缓缓缓缓。

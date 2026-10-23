@@ -1,6 +1,0 @@
-wiki docs: 82190
-wiki chars 140.4M | chat chars 104.7M
-wiki tokens 98.1M
-chat tokens 55.0M
-wiki seqs 748, chat seqs 1174
-long ctx: 2056 seqs x 32768 = 67.4M tokens (needle 134) -> D:\wt\feng-distill-30m\v2

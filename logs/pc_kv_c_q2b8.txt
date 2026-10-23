@@ -1,2 +1,0 @@
-mode=q2  ctx=2048  kv=9.62 MB  prompt_tokens=1060  gen=64
-OUT: 在看一下时，我听着。

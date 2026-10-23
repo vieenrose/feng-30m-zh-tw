@@ -1,6 +1,0 @@
-Invoke-ESPIDFTool: C:\Users\heng\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:28
-Line |
-  28 |  … f.py { Invoke-ESPIDFTool -ScriptPath "$IDF_PATH\tools\idf.py" @args }
-     |                                                                  ~~~~~
-     | 无法处理参数，因为参数名称 'p' 存在歧义。可能的匹配项包括: -ProgressAction -PipelineVariable。
-

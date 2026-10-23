@@ -1,5 +1,0 @@
-2026-10-15 19:18:57.433  INFO  starting engine
-2026-10-15 19:18:57.519  INFO  loading weights | 6.87 GiB
-2026-10-15 19:19:00.967  INFO  weights ready | 6.87 GiB | 3.4s | 1.99 GiB/s
-2026-10-15 19:19:04.352  ERROR startup failed | preparing CUDA graphs | 1.7s
-2026-10-15 19:19:04.480  FATAL server failed during startup | bad allocation

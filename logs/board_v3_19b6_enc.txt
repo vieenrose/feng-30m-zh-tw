@@ -1,3 +1,0 @@
-[boot ascii-ok] True | non-ascii bytes: 177
-[GBK   in] 你是谁？  ->  我叫 feng，由个人开发者 jiaheng 开发训练。
-[UTF-8 in] 你是谁？  ->  我叫 feng，由个人开发者 jiaheng 开发训练。

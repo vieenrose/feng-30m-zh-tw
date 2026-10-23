@@ -100,8 +100,24 @@ jobs:
           echo "phone_chat 等产物："
           ls -la /tmp/phone_build | grep -v '^d'
 
-      - name: 手机端派生副本漂移检查
-        run: python3 phone/tools/check_drift.py
+      # 2026-10-23 起 phone/engine 不再是 core/ 的手工副本（那是持续 bug 源）：
+      # 三端编同一份 core/*.c，手机差异走 -DFENG_PHONE=1。这个守卫防止副本回流。
+      - name: 单一源码守卫（phone/engine 不得出现引擎副本）
+        run: python3 phone/tools/check_single_source.py
+
+      # 交叉编译：证明 aarch64 分支（NEON 内核 + pthread 线程池）真的能编过。
+      # 只编译不运行——运行需要 qemu 与真机，见 tests/kernels 与 phone/cli/verify.sh。
+      - name: 手机端 aarch64 交叉编译（NEON 分支）
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+          for f in feng_model feng_llm feng_quant feng_smp feng_tokenizer \
+                   feng_sample feng_calc feng_tools feng_memory; do
+            aarch64-linux-gnu-gcc-14 -std=c23 -O2 -Wall -Wextra -DFENG_PHONE=1 \
+              -DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8 -Icore -Iphone/engine \
+              -c core/$f.c -o /tmp/a64_$f.o
+          done
+          echo "aarch64（FENG_PHONE=1）9/9 编译通过"
 
       - name: 文档自检（干净 clone 口径）
         run: |
@@ -112,3 +128,26 @@ jobs:
       # 黑名单硬检查在本机跑——那份名字列表本身是私密的，不能进仓库。
       - name: 隐私自检（署名里不得出现中文人名）
         run: python3 tools/check_privacy.py
+
+  # 内存安全回归：ASAN + UBSAN 跑引擎入口模糊测试与四套单测。
+  # 2026-10-22 那轮抓到的 7 个真 bug（栈写穿、long long 溢出、全表泄漏）全部
+  # 由这类夹具发现，但当时夹具放在 .cache 里没入库——这次连 CI 一起补上。
+  sanitize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 clang（msys2 的 gcc 没有 ASAN 运行时，统一用 clang）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang
+          clang --version | head -1
+
+      - name: sanitizer 回归（fuzz calc/tools/model + 四套单测）
+        env:
+          CC: clang
+          CXX: clang++
+          ROUNDS: "20000"
+          OUT: /tmp/fuzz
+        run: bash tests/fuzz/run.sh

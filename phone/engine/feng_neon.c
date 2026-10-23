@@ -156,6 +156,52 @@ void feng_neon_q4_gemv(const uint8_t *base, const int8_t *xq, const float *xscal
     }
 }
 
+/* ---- q2 KV 注意力（fp32 NEON，不需要 dotprod） ---- */
+
+/* K 打分：t ∈ [t0,t1)。每 (t,blk) 两条 4 路 FMA 链，最后水平归约。
+ * 与标量版的差别只在累加分组（4 路并行 vs 单链），fp32 噪声级。 */
+void feng_neon_q2_attn_k(const uint8_t *krow, const uint16_t *ksrow,
+                         const float *qh, float *scores,
+                         int t0, int t1, int qb, int nb, float scale,
+                         const float (*lut)[4])
+{
+    for (int t = t0; t < t1; t++) {
+        const uint8_t *kh = krow + (size_t)t * qb;
+        const uint16_t *ks = ksrow + (size_t)t * nb;
+        float32x4_t a0 = vdupq_n_f32(0.f), a1 = vdupq_n_f32(0.f);
+        for (int blk = 0; blk < nb; blk++) {
+            const float sk = feng_f16_to_f32(ks[blk]);
+            const uint8_t *bb = kh + blk * 2;
+            const float *q0 = qh + blk * 8;
+            const float32x4_t s4 = vdupq_n_f32(sk);
+            a0 = vfmaq_f32(a0, vmulq_f32(vld1q_f32(lut[bb[0]]), vld1q_f32(q0)), s4);
+            a1 = vfmaq_f32(a1, vmulq_f32(vld1q_f32(lut[bb[1]]), vld1q_f32(q0 + 4)), s4);
+        }
+        scores[t] = (vaddvq_f32(a0) + vaddvq_f32(a1)) * scale;
+    }
+}
+
+/* V 累加：只算 blk 指定的 8 维块。乘法分组 (st*lu)*sv 与标量版逐字相同、
+ * 每个 d 按 t 递增累加 —— 与标量路径逐位一致。 */
+void feng_neon_q2_attn_v(const uint8_t *vrow, const uint16_t *vsrow,
+                         const float *scores, float *vacc,
+                         int total, int qb, int nb, int blk,
+                         const float (*lut)[4])
+{
+    float32x4_t a0 = vdupq_n_f32(0.f), a1 = vdupq_n_f32(0.f);
+    for (int t = 0; t < total; t++) {
+        const float st = scores[t];
+        const float sv = feng_f16_to_f32(vsrow[(size_t)t * nb + blk]);
+        const uint8_t *bb = vrow + (size_t)t * qb + blk * 2;
+        const float32x4_t sv4 = vdupq_n_f32(sv);
+        const float32x4_t st4 = vdupq_n_f32(st);
+        a0 = vaddq_f32(a0, vmulq_f32(vmulq_f32(vld1q_f32(lut[bb[0]]), st4), sv4));
+        a1 = vaddq_f32(a1, vmulq_f32(vmulq_f32(vld1q_f32(lut[bb[1]]), st4), sv4));
+    }
+    vst1q_f32(vacc + blk * 8, a0);
+    vst1q_f32(vacc + blk * 8 + 4, a1);
+}
+
 #else  /* 非 aarch64：空实现，保证链接通过（调用方本来就只在 FENG_PHONE_NEON=1 时用） */
 
 int feng_neon_sdot_ok(void) { return 0; }
@@ -171,6 +217,24 @@ void feng_neon_q4_gemv(const uint8_t *base, const int8_t *xq, const float *xscal
                        float *y, int r0, int r1, int n_in)
 {
     (void)base; (void)xq; (void)xscale; (void)y; (void)r0; (void)r1; (void)n_in;
+}
+
+void feng_neon_q2_attn_k(const uint8_t *krow, const uint16_t *ksrow,
+                         const float *qh, float *scores,
+                         int t0, int t1, int qb, int nb, float scale,
+                         const float (*lut)[4])
+{
+    (void)krow; (void)ksrow; (void)qh; (void)scores; (void)t0; (void)t1;
+    (void)qb; (void)nb; (void)scale; (void)lut;
+}
+
+void feng_neon_q2_attn_v(const uint8_t *vrow, const uint16_t *vsrow,
+                         const float *scores, float *vacc,
+                         int total, int qb, int nb, int blk,
+                         const float (*lut)[4])
+{
+    (void)vrow; (void)vsrow; (void)scores; (void)vacc; (void)total;
+    (void)qb; (void)nb; (void)blk; (void)lut;
 }
 
 #endif

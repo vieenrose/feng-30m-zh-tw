@@ -10,6 +10,13 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+# MSYS2 / Cygwin：pwd 给 POSIX 路径（/e/...），原生 PE 编译器/程序不认；
+# pwd -W 给 Windows 路径。Linux/macOS 没有 -W，保持原样。
+if W="$(cd "$HERE" && pwd -W 2>/dev/null)" && [ -n "$W" ]; then
+    HERE="$W"
+    R="$(cd "$ROOT" && pwd -W 2>/dev/null || true)"
+    [ -n "$R" ] && ROOT="$R"
+fi
 BOARD="$ROOT/core"
 PC="$ROOT/pc"
 

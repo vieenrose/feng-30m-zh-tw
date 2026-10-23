@@ -1,6 +1,0 @@
-BOOT OK: True
-五十九加一      -> GBK解码失败: 'gbk' codec can't decode byte 0xa0 in position 6: illegal multibyte sequence
-掷骰子        -> GBK解码失败: 'gbk' codec can't decode byte 0xaa in position 5: illegal multibyte sequence
-现在几点？      -> GBK解码失败: 'gbk' codec can't decode byte 0xaf in position 11: illegal multibyte sequence
-3天后是几号     -> GBK解码失败: 'gbk' codec can't decode byte 0xaf in position 11: illegal multibyte sequence
-你是谁？       -> GBK解码失败: 'gbk' codec can't decode byte 0xaa in position 20: illegal multibyte sequence

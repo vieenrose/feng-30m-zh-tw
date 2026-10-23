@@ -1,144 +1,0 @@
-训练样本 38298 条
-有效样本 38298 条（编码 14.3s，平均 87 个 loss token）
-验证样本 689 条
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 1524.43it/s]
-每轮 1595 批，共 2392 步（accum=2，等效 batch 48）
-  step 20/2392 ep1 loss=4.3971 lr=4.00e-06 gn=2.99 0.2min peak=4.94GiB
-  step 40/2392 ep1 loss=3.6580 lr=8.00e-06 gn=3.06 0.2min peak=4.94GiB
-  step 60/2392 ep1 loss=4.0805 lr=1.00e-05 gn=1.82 0.3min peak=4.94GiB
-  step 80/2392 ep1 loss=4.2347 lr=1.00e-05 gn=1.94 0.4min peak=4.94GiB
-  step 100/2392 ep1 loss=4.0172 lr=9.99e-06 gn=2.33 0.5min peak=4.94GiB
-  step 120/2392 ep1 loss=3.1647 lr=9.98e-06 gn=4.61 0.5min peak=4.94GiB
-  step 140/2392 ep1 loss=2.1318 lr=9.97e-06 gn=2.02 0.6min peak=4.94GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.32it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.27it/s]
-  step 160/2392 ep1 loss=1.3002 lr=9.95e-06 gn=1.34 0.7min peak=4.94GiB
-  step 180/2392 ep1 loss=1.6106 lr=9.93e-06 gn=2.70 0.7min peak=4.94GiB
-  step 200/2392 ep1 loss=3.1771 lr=9.91e-06 gn=1.40 0.9min peak=4.94GiB
-  step 220/2392 ep1 loss=3.8132 lr=9.88e-06 gn=1.50 1.0min peak=4.94GiB
-  step 240/2392 ep1 loss=2.5970 lr=9.85e-06 gn=1.64 1.1min peak=4.94GiB
-  step 260/2392 ep1 loss=3.1444 lr=9.82e-06 gn=2.05 1.1min peak=4.94GiB
-  step 280/2392 ep1 loss=2.7726 lr=9.79e-06 gn=2.14 1.2min peak=4.94GiB
-  step 300/2392 ep1 loss=3.0391 lr=9.75e-06 gn=1.05 1.4min peak=6.50GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.44it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.44it/s]
-  step 320/2392 ep1 loss=3.7062 lr=9.71e-06 gn=1.73 1.5min peak=6.50GiB
-  step 340/2392 ep1 loss=3.8361 lr=9.66e-06 gn=1.58 1.5min peak=6.50GiB
-  step 360/2392 ep1 loss=3.8359 lr=9.62e-06 gn=1.91 1.6min peak=6.50GiB
-  step 380/2392 ep1 loss=3.9468 lr=9.57e-06 gn=1.01 1.7min peak=6.50GiB
-  step 400/2392 ep1 loss=3.4590 lr=9.51e-06 gn=1.95 1.8min peak=6.50GiB
-  step 420/2392 ep1 loss=3.8458 lr=9.46e-06 gn=1.39 1.9min peak=6.50GiB
-  step 440/2392 ep1 loss=3.7839 lr=9.40e-06 gn=2.25 2.0min peak=6.50GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.80it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.80it/s]
-  step 460/2392 ep1 loss=3.8843 lr=9.34e-06 gn=0.93 4.6min peak=12.81GiB
-  step 480/2392 ep1 loss=3.9138 lr=9.27e-06 gn=1.56 5.1min peak=12.81GiB
-  step 500/2392 ep1 loss=3.6907 lr=9.20e-06 gn=2.71 5.2min peak=12.81GiB
-  step 520/2392 ep1 loss=3.4109 lr=9.13e-06 gn=2.50 5.3min peak=12.81GiB
-  step 540/2392 ep1 loss=3.6968 lr=9.06e-06 gn=1.50 5.5min peak=12.81GiB
-  step 560/2392 ep1 loss=3.9096 lr=8.99e-06 gn=1.53 5.6min peak=12.81GiB
-  step 580/2392 ep1 loss=3.9888 lr=8.91e-06 gn=1.75 5.8min peak=12.81GiB
-  step 600/2392 ep1 loss=4.0187 lr=8.83e-06 gn=1.67 6.0min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  5.82it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  5.79it/s]
-  step 620/2392 ep1 loss=3.9851 lr=8.75e-06 gn=2.12 6.1min peak=12.81GiB
-  step 640/2392 ep1 loss=3.4334 lr=8.66e-06 gn=5.59 6.2min peak=12.81GiB
-  step 660/2392 ep1 loss=2.5588 lr=8.58e-06 gn=2.32 6.4min peak=12.81GiB
-  step 680/2392 ep1 loss=3.4111 lr=8.49e-06 gn=1.85 6.6min peak=12.81GiB
-  step 700/2392 ep1 loss=3.7776 lr=8.40e-06 gn=1.63 6.7min peak=12.81GiB
-  step 720/2392 ep1 loss=2.7409 lr=8.30e-06 gn=1.59 6.9min peak=12.81GiB
-  step 740/2392 ep1 loss=3.0253 lr=8.21e-06 gn=1.83 7.0min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  8.37it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  8.37it/s]
-  step 760/2392 ep1 loss=3.0802 lr=8.11e-06 gn=1.46 7.2min peak=12.81GiB
-  step 780/2392 ep1 loss=3.6128 lr=8.01e-06 gn=1.19 7.5min peak=12.81GiB
-  step 800/2392 ep2 loss=3.7800 lr=7.91e-06 gn=2.36 7.7min peak=12.81GiB
-  step 820/2392 ep2 loss=3.6486 lr=7.81e-06 gn=1.51 7.9min peak=12.81GiB
-  step 840/2392 ep2 loss=3.5911 lr=7.70e-06 gn=1.99 8.1min peak=12.81GiB
-  step 860/2392 ep2 loss=3.5706 lr=7.59e-06 gn=1.88 8.2min peak=12.81GiB
-  step 880/2392 ep2 loss=3.6723 lr=7.49e-06 gn=2.28 8.3min peak=12.81GiB
-  step 900/2392 ep2 loss=3.6112 lr=7.38e-06 gn=1.88 8.4min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.85it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.85it/s]
-  step 920/2392 ep2 loss=3.6451 lr=7.27e-06 gn=1.94 8.6min peak=12.81GiB
-  step 940/2392 ep2 loss=3.7819 lr=7.16e-06 gn=1.19 8.9min peak=12.81GiB
-  step 960/2392 ep2 loss=3.8900 lr=7.04e-06 gn=1.18 9.1min peak=12.81GiB
-  step 980/2392 ep2 loss=3.9507 lr=6.93e-06 gn=1.44 9.4min peak=12.81GiB
-  step 1000/2392 ep2 loss=3.9434 lr=6.81e-06 gn=1.39 9.7min peak=12.81GiB
-  step 1020/2392 ep2 loss=3.6919 lr=6.70e-06 gn=1.86 9.8min peak=12.81GiB
-  step 1040/2392 ep2 loss=2.1842 lr=6.58e-06 gn=2.08 9.9min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.71it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.62it/s]
-  step 1060/2392 ep2 loss=3.1398 lr=6.46e-06 gn=1.56 10.1min peak=12.81GiB
-  step 1080/2392 ep2 loss=2.8616 lr=6.35e-06 gn=2.11 10.3min peak=12.81GiB
-  step 1100/2392 ep2 loss=3.2892 lr=6.23e-06 gn=0.92 14.8min peak=12.81GiB
-  step 1120/2392 ep2 loss=3.4364 lr=6.11e-06 gn=2.47 15.0min peak=12.81GiB
-  step 1140/2392 ep2 loss=3.3184 lr=5.99e-06 gn=1.76 15.1min peak=12.81GiB
-  step 1160/2392 ep2 loss=3.6719 lr=5.87e-06 gn=1.75 15.3min peak=12.81GiB
-  step 1180/2392 ep2 loss=3.8094 lr=5.75e-06 gn=1.51 15.5min peak=12.81GiB
-  step 1200/2392 ep2 loss=2.6391 lr=5.63e-06 gn=1.67 15.6min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 11.59it/s]
-  step 1220/2392 ep2 loss=3.0219 lr=5.51e-06 gn=1.82 15.8min peak=12.81GiB
-  step 1240/2392 ep2 loss=2.2869 lr=5.39e-06 gn=1.58 15.9min peak=12.81GiB
-  step 1260/2392 ep2 loss=1.7191 lr=5.26e-06 gn=1.79 16.0min peak=12.81GiB
-  step 1280/2392 ep2 loss=1.2980 lr=5.14e-06 gn=2.11 16.0min peak=12.81GiB
-  step 1300/2392 ep2 loss=1.7900 lr=5.02e-06 gn=2.09 16.1min peak=12.81GiB
-  step 1320/2392 ep2 loss=2.8393 lr=4.90e-06 gn=1.72 16.2min peak=12.81GiB
-  step 1340/2392 ep2 loss=3.3450 lr=4.78e-06 gn=1.91 16.3min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 12.55it/s]
-  step 1360/2392 ep2 loss=3.6744 lr=4.67e-06 gn=1.07 17.4min peak=12.81GiB
-  step 1380/2392 ep2 loss=3.8711 lr=4.55e-06 gn=1.78 20.1min peak=12.81GiB
-  step 1400/2392 ep2 loss=3.8931 lr=4.43e-06 gn=1.75 20.2min peak=12.81GiB
-  step 1420/2392 ep2 loss=4.0071 lr=4.31e-06 gn=1.00 20.6min peak=12.81GiB
-  step 1440/2392 ep2 loss=3.4662 lr=4.20e-06 gn=2.53 20.7min peak=12.81GiB
-  step 1460/2392 ep2 loss=1.8570 lr=4.08e-06 gn=1.75 20.8min peak=12.81GiB
-  step 1480/2392 ep2 loss=2.4441 lr=3.97e-06 gn=1.65 21.0min peak=12.81GiB
-  step 1500/2392 ep2 loss=3.2286 lr=3.85e-06 gn=1.70 21.2min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 10.74it/s]
-  step 1520/2392 ep2 loss=3.2241 lr=3.74e-06 gn=1.88 21.5min peak=12.81GiB
-  step 1540/2392 ep2 loss=2.8677 lr=3.63e-06 gn=1.01 22.6min peak=12.81GiB
-  step 1560/2392 ep2 loss=3.5250 lr=3.52e-06 gn=1.15 23.9min peak=12.81GiB
-  step 1580/2392 ep2 loss=3.7441 lr=3.42e-06 gn=1.84 24.1min peak=12.81GiB
-  step 1600/2392 ep3 loss=3.6875 lr=3.31e-06 gn=1.09 25.9min peak=12.81GiB
-  step 1620/2392 ep3 loss=3.8727 lr=3.20e-06 gn=1.13 29.3min peak=12.81GiB
-  step 1640/2392 ep3 loss=3.9602 lr=3.10e-06 gn=1.01 31.4min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.59it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.59it/s]
-  step 1660/2392 ep3 loss=3.9194 lr=3.00e-06 gn=1.43 32.3min peak=12.81GiB
-  step 1680/2392 ep3 loss=3.9397 lr=2.90e-06 gn=0.92 34.5min peak=12.81GiB
-  step 1700/2392 ep3 loss=2.8730 lr=2.80e-06 gn=1.74 38.5min peak=12.81GiB
-  step 1720/2392 ep3 loss=3.0468 lr=2.71e-06 gn=1.88 38.7min peak=12.81GiB
-  step 1740/2392 ep3 loss=2.2530 lr=2.61e-06 gn=2.15 38.8min peak=12.81GiB
-  step 1760/2392 ep3 loss=2.6154 lr=2.52e-06 gn=1.84 38.9min peak=12.81GiB
-  step 1780/2392 ep3 loss=3.1731 lr=2.43e-06 gn=1.90 39.2min peak=12.81GiB
-  step 1800/2392 ep3 loss=3.5344 lr=2.35e-06 gn=1.81 39.4min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.59it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  9.59it/s]
-  step 1820/2392 ep3 loss=3.8135 lr=2.26e-06 gn=1.69 40.0min peak=12.81GiB
-  step 1840/2392 ep3 loss=3.8548 lr=2.18e-06 gn=1.46 40.2min peak=12.81GiB
-  step 1860/2392 ep3 loss=2.8214 lr=2.10e-06 gn=1.92 40.5min peak=12.81GiB
-  step 1880/2392 ep3 loss=3.0053 lr=2.02e-06 gn=1.63 40.7min peak=12.81GiB
-  step 1900/2392 ep3 loss=3.2011 lr=1.94e-06 gn=1.66 40.8min peak=12.81GiB
-  step 1920/2392 ep3 loss=2.7896 lr=1.87e-06 gn=1.46 41.0min peak=12.81GiB
-  step 1940/2392 ep3 loss=2.5790 lr=1.80e-06 gn=1.74 41.2min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 10.01it/s]
-  step 1960/2392 ep3 loss=3.1278 lr=1.73e-06 gn=2.25 41.4min peak=12.81GiB
-  step 1980/2392 ep3 loss=2.0163 lr=1.67e-06 gn=1.58 41.5min peak=12.81GiB
-  step 2000/2392 ep3 loss=3.0591 lr=1.61e-06 gn=1.60 41.8min peak=12.81GiB
-  step 2020/2392 ep3 loss=3.4937 lr=1.55e-06 gn=1.30 42.1min peak=12.81GiB
-  step 2040/2392 ep3 loss=3.7044 lr=1.49e-06 gn=1.73 42.4min peak=12.81GiB
-  step 2060/2392 ep3 loss=3.2171 lr=1.44e-06 gn=1.61 42.5min peak=12.81GiB
-  step 2080/2392 ep3 loss=2.6446 lr=1.39e-06 gn=1.90 42.7min peak=12.81GiB
-  step 2100/2392 ep3 loss=2.3496 lr=1.34e-06 gn=1.81 42.8min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.67it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  7.64it/s]
-  step 2120/2392 ep3 loss=2.8699 lr=1.30e-06 gn=1.24 43.2min peak=12.81GiB
-  step 2140/2392 ep3 loss=3.2094 lr=1.25e-06 gn=1.79 43.6min peak=12.81GiB
-  step 2160/2392 ep3 loss=2.7125 lr=1.22e-06 gn=1.08 43.8min peak=12.81GiB
-  step 2180/2392 ep3 loss=3.1443 lr=1.18e-06 gn=2.30 44.2min peak=12.81GiB
-  step 2200/2392 ep3 loss=3.4441 lr=1.15e-06 gn=1.35 44.5min peak=12.81GiB
-  step 2220/2392 ep3 loss=3.1851 lr=1.12e-06 gn=1.67 44.7min peak=12.81GiB
-  step 2240/2392 ep3 loss=2.3329 lr=1.09e-06 gn=1.94 44.9min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  5.99it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  5.96it/s]
-  step 2260/2392 ep3 loss=3.0718 lr=1.07e-06 gn=1.12 45.3min peak=12.81GiB
-  step 2280/2392 ep3 loss=3.5344 lr=1.05e-06 gn=1.78 45.6min peak=12.81GiB
-  step 2300/2392 ep3 loss=3.3275 lr=1.03e-06 gn=2.04 45.8min peak=12.81GiB
-  step 2320/2392 ep3 loss=2.9153 lr=1.02e-06 gn=1.46 46.0min peak=12.81GiB
-  step 2340/2392 ep3 loss=3.4647 lr=1.01e-06 gn=1.29 46.4min peak=12.81GiB
-  step 2360/2392 ep3 loss=3.6986 lr=1.00e-06 gn=1.24 46.8min peak=12.81GiB
-  step 2380/2392 ep3 loss=3.6718 lr=1.00e-06 gn=1.77 47.0min peak=12.81GiB
-  step 2392/2392 ep3 loss=3.2875 lr=1.00e-06 gn=1.87 47.1min peak=12.81GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 10.18it/s]
-
-完成：2392 步 / 47.5 min / 峰值 12.81 GiB / val_loss 3.9072
-权重 -> v4\sft_pc2\final

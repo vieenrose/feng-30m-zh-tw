@@ -1,0 +1,39 @@
+{
+  "_comment": "发布产物的唯一权威清单。权重不入库（体积），但哈希必须入库——否则换机器/硬盘坏了，这个项目只剩推理代码。校验：python tools/verify_weights.py",
+  "version": "4.0 / 4.0-embed",
+  "commit_at_release": "6df0472",
+  "artifacts": [
+    {
+      "path": "board/model_export_4.0-embed/model.bin",
+      "role": "手机 / ESP32 发布权重（Q4，11 层 / 448 hidden / 16384 词表）",
+      "bytes": 15659904,
+      "sha256": "b159fd8e8c3333ffbc6c068e6d0c8f9331d3934e7c27e7188805314c322e48c0",
+      "required_for": ["板端烧录 0x110000", "手机 adb push"]
+    },
+    {
+      "path": "board/model_export_4.0-embed/tokenizer.bin",
+      "role": "分词器（16384 BPE，与 model.bin 配套）",
+      "bytes": 423154,
+      "sha256": "7c4eff87b2101327710f017a1536acd21f0f4531fb3fc4b90232520dfeb651f0",
+      "required_for": ["板端烧录 0x1000000", "手机 adb push"]
+    },
+    {
+      "path": "board/model_export_4.0-embed/ref_logits.bin",
+      "role": "pc_check 对拍基准（fp32 logits，9 token 前缀）",
+      "bytes": 65536,
+      "sha256": "3ef573005f9f247ed5d0040a7506edd806558526fa41de09b894dcca3f14ac49",
+      "required_for": ["check_all 的 pc_check 项"]
+    },
+    {
+      "path": "v4/patch_name_e5_lr5e-6/model.safetensors",
+      "role": "PC 发布权重（fp16 safetensors，可直接被 transformers 加载）",
+      "bytes": null,
+      "sha256": "f69fc934fc072912f1fc278b44362fb22418de4fdfc27ca49be4f9e8450cccc0",
+      "required_for": ["复现导出 board/model_export_*", "重跑基准/长文评测"]
+    }
+  ],
+  "not_required": [
+    "v4/sft_pc2、v4/qat_*、v4/4.0-*（训练中间产物，14 GB；只影响复现训练过程，不影响推理与发布）",
+    "data/（语料，1.4 GB；训练才需要）"
+  ]
+}

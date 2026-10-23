@@ -1,7 +1,0 @@
-
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]
-Loading weights: 100%|��������������������| 123/123 [00:00<00:00, 2207.96it/s]
-model: 11L hidden=448 heads=7x64 ffn=896 vocab=16384 rope_theta=1000000.0
-model.bin: 14.93 MB, 123 tensors
-tokenizer.bin: 413 KB, vocab 16384, merges 16124, specials {'<|endoftext|>': 0, '<|im_end|>': 2, '<|im_start|>': 1, '<|pad|>': 3}
-wrote ref_logits.bin / ref_ids.json / export_info.json

@@ -1,8 +1,0 @@
-ggml_cuda_init: found 1 CUDA devices (Total VRAM: 16283 MiB):
-  Device 0: NVIDIA GeForce RTX 5060 Ti, compute capability 12.0, VMM: yes, VRAM: 16283 MiB
-| model                          |       size |     params | backend    | ngl | threads |            test |                  t/s |
-| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | --------------: | -------------------: |
-| qwen3 ?B Q4_K - Medium         |  23.03 MiB |    29.43 M | CUDA       |   0 |       8 |            pp32 |     2433.91 ± 956.61 |
-| qwen3 ?B Q4_K - Medium         |  23.03 MiB |    29.43 M | CUDA       |   0 |       8 |            tg64 |      1130.05 ± 39.83 |
-
-build: a2878d30d (10909)

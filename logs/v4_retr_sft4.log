@@ -1,105 +1,0 @@
-[13:05:15] === retrieval 4096: 800 samples | init v4\sft_pc2\final | 2x4 | 200 steps | 2 epoch(s) | lr 1.5e-05 ===
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights:  49%|████▉     | 60/123 [00:00<00:00, 592.96it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 969.36it/s]
-[13:05:24] [retr4096] step 5/200 loss 0.4287 lr 7.50e-06 gnorm 18.37 19,932 tok/s 0.1min peak 3.17GiB
-[13:05:28] [retr4096] step 10/200 loss 0.7133 lr 1.50e-05 gnorm 58.54 25,960 tok/s 0.2min peak 3.17GiB
-[13:05:33] [retr4096] step 15/200 loss 0.4919 lr 1.50e-05 gnorm 14.92 28,785 tok/s 0.3min peak 3.17GiB
-[13:05:37] [retr4096] step 20/200 loss 0.5648 lr 1.49e-05 gnorm 16.19 30,491 tok/s 0.4min peak 3.17GiB
-[13:05:42] [retr4096] step 25/200 loss 1.0791 lr 1.48e-05 gnorm 28.76 31,671 tok/s 0.4min peak 3.17GiB
-[13:05:46] [retr4096] step 30/200 loss 0.4983 lr 1.46e-05 gnorm 9.14 32,475 tok/s 0.5min peak 3.17GiB
-[13:05:50] [retr4096] step 35/200 loss 0.3996 lr 1.44e-05 gnorm 5.71 33,050 tok/s 0.6min peak 3.17GiB
-[13:05:55] [retr4096] step 40/200 loss 0.3019 lr 1.42e-05 gnorm 7.82 33,502 tok/s 0.7min peak 3.17GiB
-[13:05:59] [retr4096] step 45/200 loss 0.7763 lr 1.39e-05 gnorm 16.32 33,859 tok/s 0.7min peak 3.17GiB
-[13:06:04] [retr4096] step 50/200 loss 0.3446 lr 1.36e-05 gnorm 12.28 34,128 tok/s 0.8min peak 3.17GiB
-[13:06:08] [retr4096] step 55/200 loss 0.4777 lr 1.32e-05 gnorm 15.67 34,310 tok/s 0.9min peak 3.17GiB
-[13:06:13] [retr4096] step 60/200 loss 0.5727 lr 1.28e-05 gnorm 11.54 34,489 tok/s 0.9min peak 3.17GiB
-[13:06:17] [retr4096] step 65/200 loss 0.2469 lr 1.24e-05 gnorm 7.48 34,642 tok/s 1.0min peak 3.17GiB
-[13:06:22] [retr4096] step 70/200 loss 0.0868 lr 1.19e-05 gnorm 8.11 34,746 tok/s 1.1min peak 3.17GiB
-[13:06:26] [retr4096] step 75/200 loss 0.2465 lr 1.15e-05 gnorm 4.22 34,886 tok/s 1.2min peak 3.17GiB
-[13:06:31] [retr4096] step 80/200 loss 0.2358 lr 1.10e-05 gnorm 8.37 35,012 tok/s 1.2min peak 3.17GiB
-[13:06:35] [retr4096] step 85/200 loss 0.1149 lr 1.04e-05 gnorm 2.95 35,106 tok/s 1.3min peak 3.17GiB
-[13:06:40] [retr4096] step 90/200 loss 0.3656 lr 9.91e-06 gnorm 15.46 35,176 tok/s 1.4min peak 3.17GiB
-[13:06:44] [retr4096] step 95/200 loss 0.2941 lr 9.36e-06 gnorm 6.09 35,255 tok/s 1.5min peak 3.17GiB
-[13:06:48] [retr4096] step 100/200 loss 0.3066 lr 8.81e-06 gnorm 5.40 35,340 tok/s 1.5min peak 3.17GiB
-[13:06:53] [retr4096] step 105/200 loss 0.7001 lr 8.25e-06 gnorm 13.50 35,406 tok/s 1.6min peak 3.17GiB
-[13:06:57] [retr4096] step 110/200 loss 0.2497 lr 7.69e-06 gnorm 5.75 35,477 tok/s 1.7min peak 3.17GiB
-[13:07:02] [retr4096] step 115/200 loss 0.4804 lr 7.14e-06 gnorm 6.39 35,542 tok/s 1.8min peak 3.17GiB
-[13:07:06] [retr4096] step 120/200 loss 0.2631 lr 6.59e-06 gnorm 4.41 35,600 tok/s 1.8min peak 3.17GiB
-[13:07:11] [retr4096] step 125/200 loss 0.2397 lr 6.06e-06 gnorm 5.54 35,654 tok/s 1.9min peak 3.17GiB
-[13:07:15] [retr4096] step 130/200 loss 0.1305 lr 5.54e-06 gnorm 12.82 35,700 tok/s 2.0min peak 3.17GiB
-[13:07:19] [retr4096] step 135/200 loss 0.0548 lr 5.04e-06 gnorm 2.81 35,750 tok/s 2.1min peak 3.17GiB
-[13:07:24] [retr4096] step 140/200 loss 0.6555 lr 4.56e-06 gnorm 13.58 35,798 tok/s 2.1min peak 3.17GiB
-[13:07:28] [retr4096] step 145/200 loss 0.4404 lr 4.10e-06 gnorm 7.85 35,840 tok/s 2.2min peak 3.17GiB
-[13:07:33] [retr4096] step 150/200 loss 0.3274 lr 3.68e-06 gnorm 8.50 35,876 tok/s 2.3min peak 3.17GiB
-[13:07:37] [retr4096] step 155/200 loss 0.3899 lr 3.28e-06 gnorm 15.44 35,910 tok/s 2.4min peak 3.17GiB
-[13:07:42] [retr4096] step 160/200 loss 0.1711 lr 2.92e-06 gnorm 4.47 35,943 tok/s 2.4min peak 3.17GiB
-[13:07:46] [retr4096] step 165/200 loss 0.4645 lr 2.60e-06 gnorm 12.70 35,974 tok/s 2.5min peak 3.17GiB
-[13:07:50] [retr4096] step 170/200 loss 0.0333 lr 2.31e-06 gnorm 1.63 36,001 tok/s 2.6min peak 3.17GiB
-[13:07:55] [retr4096] step 175/200 loss 0.2618 lr 2.07e-06 gnorm 8.79 36,016 tok/s 2.7min peak 3.17GiB
-[13:07:59] [retr4096] step 180/200 loss 0.1250 lr 1.87e-06 gnorm 3.71 36,042 tok/s 2.7min peak 3.17GiB
-[13:08:04] [retr4096] step 185/200 loss 0.1243 lr 1.71e-06 gnorm 3.08 36,054 tok/s 2.8min peak 3.17GiB
-[13:08:08] [retr4096] step 190/200 loss 0.4197 lr 1.59e-06 gnorm 7.62 36,072 tok/s 2.9min peak 3.17GiB
-[13:08:13] [retr4096] step 195/200 loss 0.1049 lr 1.52e-06 gnorm 3.06 36,094 tok/s 2.9min peak 3.17GiB
-[13:08:17] [retr4096] step 200/200 loss 0.2646 lr 1.50e-06 gnorm 5.22 36,102 tok/s 3.0min peak 3.17GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  4.53it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  4.53it/s]
-[13:08:17] saved -> v4\retr_sft4\ctx4096\final (loss 0.2646)
-[13:08:17] === retrieval 8192: 400 samples | init v4\retr_sft4\ctx4096\final | 2x4 | 100 steps | 2 epoch(s) | lr 1.2e-05 ===
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights:  59%|█████▊    | 72/123 [00:00<00:00, 717.89it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 1040.14it/s]
-[13:08:31] [retr8192] step 5/100 loss 0.4348 lr 6.00e-06 gnorm 14.40 25,496 tok/s 0.2min peak 5.57GiB
-[13:08:43] [retr8192] step 10/100 loss 0.4117 lr 1.20e-05 gnorm 9.28 25,456 tok/s 0.4min peak 5.57GiB
-[13:08:56] [retr8192] step 15/100 loss 0.0637 lr 1.19e-05 gnorm 3.26 25,519 tok/s 0.6min peak 5.57GiB
-[13:09:09] [retr8192] step 20/100 loss 0.2136 lr 1.17e-05 gnorm 7.95 25,621 tok/s 0.9min peak 5.57GiB
-[13:09:21] [retr8192] step 25/100 loss 0.1069 lr 1.13e-05 gnorm 5.09 25,725 tok/s 1.1min peak 5.57GiB
-[13:09:34] [retr8192] step 30/100 loss 0.2577 lr 1.07e-05 gnorm 10.49 25,722 tok/s 1.3min peak 5.57GiB
-[13:09:47] [retr8192] step 35/100 loss 0.3410 lr 1.01e-05 gnorm 15.51 25,719 tok/s 1.5min peak 5.57GiB
-[13:10:00] [retr8192] step 40/100 loss 0.1577 lr 9.30e-06 gnorm 9.46 25,728 tok/s 1.7min peak 5.57GiB
-[13:10:12] [retr8192] step 45/100 loss 0.3608 lr 8.45e-06 gnorm 15.06 25,729 tok/s 1.9min peak 5.57GiB
-[13:10:25] [retr8192] step 50/100 loss 0.2260 lr 7.54e-06 gnorm 7.85 25,723 tok/s 2.1min peak 5.57GiB
-[13:10:38] [retr8192] step 55/100 loss 0.1282 lr 6.60e-06 gnorm 6.48 25,698 tok/s 2.3min peak 5.57GiB
-[13:10:51] [retr8192] step 60/100 loss 0.2995 lr 5.66e-06 gnorm 22.38 25,683 tok/s 2.6min peak 5.57GiB
-[13:11:04] [retr8192] step 65/100 loss 0.4364 lr 4.75e-06 gnorm 8.19 25,693 tok/s 2.8min peak 5.57GiB
-[13:11:16] [retr8192] step 70/100 loss 0.3009 lr 3.90e-06 gnorm 8.17 25,699 tok/s 3.0min peak 5.57GiB
-[13:11:29] [retr8192] step 75/100 loss 0.1160 lr 3.13e-06 gnorm 3.31 25,699 tok/s 3.2min peak 5.57GiB
-[13:11:42] [retr8192] step 80/100 loss 0.1523 lr 2.46e-06 gnorm 9.59 25,697 tok/s 3.4min peak 5.57GiB
-[13:11:55] [retr8192] step 85/100 loss 0.4275 lr 1.92e-06 gnorm 13.51 25,693 tok/s 3.6min peak 5.57GiB
-[13:12:07] [retr8192] step 90/100 loss 0.1426 lr 1.53e-06 gnorm 5.11 25,696 tok/s 3.8min peak 5.57GiB
-[13:12:20] [retr8192] step 95/100 loss 0.0388 lr 1.28e-06 gnorm 1.21 25,697 tok/s 4.0min peak 5.57GiB
-[13:12:33] [retr8192] step 100/100 loss 0.0715 lr 1.20e-06 gnorm 3.94 25,698 tok/s 4.2min peak 5.57GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.34it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.34it/s]
-[13:12:33] saved -> v4\retr_sft4\ctx8192\final (loss 0.0715)
-[13:12:33] === retrieval 16384: 200 samples | init v4\retr_sft4\ctx8192\final | 1x4 | 100 steps | 2 epoch(s) | lr 9e-06 ===
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 1332.32it/s]
-[13:12:52] [retr16384] step 5/100 loss 0.0337 lr 4.50e-06 gnorm 2.58 17,214 tok/s 0.3min peak 5.57GiB
-[13:13:11] [retr16384] step 10/100 loss 0.3070 lr 9.00e-06 gnorm 14.40 17,259 tok/s 0.6min peak 5.57GiB
-[13:13:30] [retr16384] step 15/100 loss 0.0294 lr 8.94e-06 gnorm 2.15 17,277 tok/s 0.9min peak 5.57GiB
-[13:13:49] [retr16384] step 20/100 loss 0.3493 lr 8.76e-06 gnorm 21.66 17,296 tok/s 1.3min peak 5.57GiB
-[13:14:08] [retr16384] step 25/100 loss 0.0414 lr 8.46e-06 gnorm 4.88 17,310 tok/s 1.6min peak 5.57GiB
-[13:14:27] [retr16384] step 30/100 loss 0.3322 lr 8.05e-06 gnorm 13.11 17,322 tok/s 1.9min peak 5.57GiB
-[13:14:46] [retr16384] step 35/100 loss 0.2623 lr 7.55e-06 gnorm 38.24 17,335 tok/s 2.2min peak 5.57GiB
-[13:15:04] [retr16384] step 40/100 loss 0.3638 lr 6.98e-06 gnorm 12.52 17,342 tok/s 2.5min peak 5.57GiB
-[13:15:23] [retr16384] step 45/100 loss 0.2632 lr 6.34e-06 gnorm 65.15 17,342 tok/s 2.8min peak 5.57GiB
-[13:15:42] [retr16384] step 50/100 loss 0.7083 lr 5.65e-06 gnorm 11.62 17,342 tok/s 3.1min peak 5.57GiB
-[13:16:01] [retr16384] step 55/100 loss 0.0087 lr 4.95e-06 gnorm 0.62 17,347 tok/s 3.5min peak 5.57GiB
-[13:16:20] [retr16384] step 60/100 loss 0.5640 lr 4.25e-06 gnorm 23.53 17,348 tok/s 3.8min peak 5.57GiB
-[13:16:39] [retr16384] step 65/100 loss 0.1272 lr 3.56e-06 gnorm 12.00 17,352 tok/s 4.1min peak 5.57GiB
-[13:16:58] [retr16384] step 70/100 loss 0.1763 lr 2.93e-06 gnorm 17.68 17,357 tok/s 4.4min peak 5.57GiB
-[13:17:16] [retr16384] step 75/100 loss 0.2940 lr 2.35e-06 gnorm 9.66 17,365 tok/s 4.7min peak 5.57GiB
-[13:17:35] [retr16384] step 80/100 loss 0.1868 lr 1.85e-06 gnorm 6.87 17,370 tok/s 5.0min peak 5.57GiB
-[13:17:54] [retr16384] step 85/100 loss 0.3691 lr 1.44e-06 gnorm 12.51 17,373 tok/s 5.3min peak 5.57GiB
-[13:18:13] [retr16384] step 90/100 loss 0.1280 lr 1.14e-06 gnorm 7.83 17,376 tok/s 5.7min peak 5.57GiB
-[13:18:31] [retr16384] step 95/100 loss 0.0134 lr 9.62e-07 gnorm 0.83 17,381 tok/s 6.0min peak 5.57GiB
-[13:18:50] [retr16384] step 100/100 loss 0.2844 lr 9.00e-07 gnorm 24.90 17,383 tok/s 6.3min peak 5.57GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.85it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.85it/s]
-[13:18:50] saved -> v4\retr_sft4\ctx16384\final (loss 0.2844)
-[13:18:50] === retrieval 32768: 80 samples | init v4\retr_sft4\ctx16384\final | 1x4 | 40 steps | 2 epoch(s) | lr 6e-06 ===
-Loading weights:   0%|          | 0/123 [00:00<?, ?it/s]Loading weights:  75%|███████▍  | 92/123 [00:00<00:00, 916.90it/s]Loading weights: 100%|██████████| 123/123 [00:00<00:00, 1129.07it/s]
-[13:19:51] [retr32768] step 5/40 loss 0.5131 lr 3.00e-06 gnorm 22.64 10,885 tok/s 1.0min peak 10.28GiB
-[13:20:51] [retr32768] step 10/40 loss 0.0541 lr 6.00e-06 gnorm 8.64 10,889 tok/s 2.0min peak 10.28GiB
-[13:21:51] [retr32768] step 15/40 loss 0.0116 lr 5.64e-06 gnorm 1.53 10,890 tok/s 3.0min peak 10.28GiB
-[13:22:51] [retr32768] step 20/40 loss 0.3036 lr 4.65e-06 gnorm 9.69 10,891 tok/s 4.0min peak 10.28GiB
-[13:23:52] [retr32768] step 25/40 loss 0.0233 lr 3.30e-06 gnorm 3.01 10,893 tok/s 5.0min peak 10.28GiB
-[13:24:52] [retr32768] step 30/40 loss 0.6544 lr 1.95e-06 gnorm 25.30 10,892 tok/s 6.0min peak 10.28GiB
-[13:25:52] [retr32768] step 35/40 loss 0.0205 lr 9.62e-07 gnorm 3.08 10,890 tok/s 7.0min peak 10.28GiB
-[13:26:52] [retr32768] step 40/40 loss 1.8299 lr 6.00e-07 gnorm 39.54 10,884 tok/s 8.0min peak 10.28GiB
-Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.42it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  6.42it/s]
-[13:26:53] saved -> v4\retr_sft4\ctx32768\final (loss 1.8299)
-[13:26:53] retrieval SFT done -> v4\retr_sft4\ctx32768\final

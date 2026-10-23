@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""校验本地发布产物的 sha256 与 `weights/manifest.json` 是否一致。
+
+为什么需要它：权重体积太大不进 git，但**哈希必须进**。没有这份清单，
+换台机器 / 硬盘坏掉之后，这个项目就只剩推理代码——模型没了，而且无法确认
+手上这份是不是当初发布的那份。
+
+用法：
+    python tools/verify_weights.py            # 缺文件只警告（干净 clone 的正常状态）
+    python tools/verify_weights.py --strict   # 缺文件也算失败（发版前 / 备份校验用）
+
+退出码：0 = 全部一致（或非严格模式下只是缺文件）；1 = 哈希不符 / 严格模式缺文件。
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = ROOT / "weights" / "manifest.json"
+
+
+def sha256_file(path: Path, chunk: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            b = f.read(chunk)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--strict", action="store_true", help="缺文件也算失败")
+    args = ap.parse_args()
+
+    if not MANIFEST.is_file():
+        print(f"找不到清单 {MANIFEST}")
+        return 1
+    man = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    arts = man.get("artifacts", [])
+    print(f"清单版本 {man.get('version')}（发布时 commit {man.get('commit_at_release')}），"
+          f"{len(arts)} 个产物")
+
+    ok = missing = bad = 0
+    for a in arts:
+        p = ROOT / a["path"]
+        if not p.is_file():
+            missing += 1
+            print(f"  [缺失] {a['path']}  （{a['role']}）")
+            continue
+        got = sha256_file(p)
+        if got != a["sha256"]:
+            bad += 1
+            print(f"  [不符] {a['path']}\n         期望 {a['sha256']}\n         实际 {got}")
+            continue
+        size_note = ""
+        if a.get("bytes") is not None and p.stat().st_size != a["bytes"]:
+            bad += 1
+            print(f"  [大小不符] {a['path']}：清单 {a['bytes']} 字节，实际 {p.stat().st_size}")
+            continue
+        ok += 1
+        print(f"  [一致] {a['path']}  {p.stat().st_size / 1048576:.1f} MB{size_note}")
+
+    print(f"\n一致 {ok} / 缺失 {missing} / 不符 {bad}")
+    if bad:
+        print("哈希不符：这份产物不是当初发布的那份，不要用来烧录或发版。")
+        return 1
+    if missing and args.strict:
+        print("严格模式：缺少发布产物。先按 docs/RELEASE.md 恢复备份。")
+        return 1
+    if missing:
+        print("提示：缺的是未入库的大文件（正常）。发版前请用 --strict 校验。")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

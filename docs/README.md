@@ -28,6 +28,7 @@
 | [`v3x-lesson.md`](v3x-lesson.md) | **v3.x 迭代复盘**：二十余次更新按问题类型归类——症状 / 根因 / 尝试 / 解法 / 教训，附**已证伪、不要再试**的路线清单 |
 | [`COMPARISON.md`](COMPARISON.md) | v1 / v2 / v3 / v4 四代的架构、语料、评测横向对比 |
 | [`DELIVERY.md`](DELIVERY.md) | 交付清单、验收口径、硬件约束与踩过的坑 |
+| [`RELEASE.md`](RELEASE.md) | **发布产物与备份**：sha256 清单、备份什么、恢复步骤、从 PC 权重复现导出 |
 | [`esp32-firmware.md`](esp32-firmware.md) | 固件工程：硬件要求、引擎结构、编译烧录、串口协议、实测结果 |
 | [`board-qat.md`](board-qat.md) | **4.0-embed 的发布记录**：H 候选（4.0B + v3.19 embedding）的 QAT/soup 失败对照与最终指标 |
 

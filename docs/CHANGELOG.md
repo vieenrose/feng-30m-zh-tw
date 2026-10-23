@@ -8,7 +8,7 @@
 > - 本文按**时间倒序**排列（最新在最上）；当前发布 = **PC 权重 4.0**
 >   （`v4/patch_name_e5_lr5e-6`）+ **手机/ESP32 权重 4.0-embed**
 >   （`board/model_export_4.0-embed/`）+ **v4.0 引擎**
->   （严格 C23、四个 tool、固件 **280,736 B**）。
+>   （严格 C23、四个 tool、固件 **281,248 B**）。
 >   4.0-embed 由测试版 `4.0-20261018H` 发布，见顶部 4.0-embed 一节。
 > - 故事线与横向对比见 [`COMPARISON.md`](COMPARISON.md)；使用说明见 [`USAGE.md`](USAGE.md)。
 > - 每节的**失败尝试都保留**（含被证伪的路线），供后续避免重复踩坑；
@@ -20,6 +20,78 @@
 >   保留不改写（改写历史记录比留一个失效路径更糟），读的时候当成"当时的目录名"即可。
 >   旧版权重需要时从 GitHub Release 取（`ghfast.top` 镜像实测 11 MB/s）。
 >   `tools/check_md.py` 已把这三个前缀列为"允许缺失"。
+
+---
+
+## 工程化补课（2026-10-23）—— 单一源码、fuzz 入库、权重清单
+
+用户要求「全盘扫 + 全修复」。这一轮**没动模型、没动权重**，改的全是会让项目
+慢性失血的结构问题；每条都带可复现的验收数字。
+
+### 1. 单一源码：删掉 `phone/engine/` 那 18 个手工副本
+
+之前 `phone/engine/` 是 `core/` 的拷贝（4909 行，`feng_llm.c` 分叉 458 行、
+`feng_smp.c` 246 行），同步靠人 `cp`，`check_drift.py` 只能在漂移**之后**报警。
+现在三端编同一份 `core/*.c`，手机差异走 `-DFENG_PHONE=1`：
+
+| 位置 | 手机分支 |
+|---|---|
+| `core/feng_smp.c` | `#elif defined(FENG_PHONE)`：pthread 线程池；`feng_par_run` 也接进池子（原来手机版是串行占位） |
+| `core/feng_quant.c` | `#if FENG_PHONE_NEON`：Q4 sdot / fp16 NEON 分派；`feng_gemv3` 走并行 |
+| `core/feng_llm.c` | `#if FENG_PHONE_NEON`：q2 注意力 K/V 的 NEON 内核；`FENG_ATTN_PARTS` 手机默认 4 |
+| `core/feng.h` | `#ifdef FENG_PHONE` 包含 `feng_phone.h`；`FENG_MAX_SCORES` 跟随 `FENG_PHONE_MAX_CTX` |
+
+`phone/engine/` 只剩 4 个手机独有文件（`feng_phone.c/h`、`feng_neon.c/h`）。
+守卫换成 `phone/tools/check_single_source.py`（副本回流即失败），CI 与
+`check_all` 都跑它。
+
+**关键点**：q2 注意力没有复制两份实现，而是把 NEON 内核接到**同一条**
+`q2_attn_range` 路径里（K 段换 kernel、V 段按 8 维 block 调 kernel），
+并行来自按 head 切分——所以板端代码路径逐字未变。
+
+验收：
+- PC `pc_kv_suite` **27/27 + 4/4**，四个针点 token id 与基线逐一相同；
+- `pc_mt_suite` 输出与基线**逐字节一致**；
+- `pc_check` argmax MATCH；
+- 板端 xtensa **9/9 零警告**，整套固件 **281,248 B**（与改造前同尺寸）；
+- 手机 arm64 交叉构建 **87.5 KB**（原 89.6 KB，少的是重复代码）；
+- `phone/cli/verify.sh`：单线程 / 4 线程 / NEON 关，与「板端原始引擎」逐字节一致。
+
+### 2. fuzz + sanitizer 入库并进 CI
+
+2026-10-22 抓到的 7 个真 bug（栈写穿 40 B、`long long` 溢出、8 张表全泄漏）
+全是临时夹具发现的，而夹具当时放在被 gitignore 的 `.cache` 里——**经验留不下来**。
+现在 `tests/fuzz/`：
+
+- `fuzz_main.c` 三个入口：`calc`（中文数字/单位/括号/截断 UTF-8/超长串）、
+  `tools`（`rand_range` 全值域 × 极端区间、时间/记忆畸形输入）、
+  `model`（随机字节与自相矛盾头部，必须被拒且不越界读）；
+- `run.sh`：clang `-fsanitize=address,undefined -fno-sanitize-recover=all`，
+  三个模式各 2 万轮 + 四套单测也过一遍 sanitizer；
+- CI 新增 `sanitize` job；同时新增 aarch64 交叉编译步骤（证明 NEON 分支能编过）。
+
+首跑就抓到 fuzzer 自己的 UB（`(int64_t)rnd32() << 32` 左移溢出），已修——
+这条正好说明这类检查值得天天跑。
+
+### 3. 权重清单：项目第一次有了「丢了怎么恢复」
+
+仓库 3.1 MB / 1603 个文件，工作区 17 GB（`v4/` 占 14 GB），**权重一个都不在库里**，
+也没有下载脚本。新增：
+
+- `weights/manifest.json`：4 个发布产物的 sha256 + 字节数 + 角色；
+- `tools/verify_weights.py`：校验本地产物，`--strict` 用于发版前/备份校验；
+- `docs/RELEASE.md`：备份什么、怎么恢复、恢复后怎么确认、从 PC 权重复现导出的命令。
+
+实测 `verify_weights.py` 4/4 一致（`model.bin`、`tokenizer.bin`、`ref_logits.bin`、
+`model.safetensors`）。
+
+### 4. 仓库卫生
+
+- `logs/` 取消跟踪 **547 个**从未被任何文档/脚本引用的日志（文件保留在磁盘），
+  只留 148 个证据日志；`.gitignore` 加 `logs/`（新日志默认不进库，要留证据用 `git add -f`）。
+- 仓库里**没有**任何 `.pyc/.o/.exe` 被跟踪（已核查）。
+- 已知未处理：`.git` 仍有 **159 MB**（历史里传过 10 MB 数据集和 1 MB `.err` 日志又删了）。
+  瘦身要 `git filter-repo` + 强推，**会改写全部 commit hash**，需要单独决策，本轮没动。
 
 ---
 
@@ -60,7 +132,7 @@
 - 板端工具链（xtensa gcc 14.2，用 `build/compile_commands.json` 的真实参数）：
   core/ 9 个文件 **9/9 零警告**；
 - 手机端 `phone/cli/build.sh`（clang 22，-Wall）编译通过；
-- `phone/tools/check_drift.py`：phone/engine 副本已同步，基准已重建。
+- `check_drift.py`（2026-10-23 已删除，改为单一源码守卫）：phone/engine 副本已同步，基准已重建。
 
 教训：中文数字的单位展开（「万」连写）在**字节数**上永远是压缩的，真正的
 溢出入口是**纯数字串**（20 个以上连续中文数字）；模糊测试要覆盖「连续同段」
@@ -124,7 +196,7 @@
 - 板端工具链（xtensa gcc 14.2，用 `build/compile_commands.json` 的真实参数）：
   core/ 9 个文件 **9/9 零警告**；
 - 手机端 `phone/cli/build.sh`（clang 22，-Wall）编译通过；
-- `phone/tools/check_drift.py`：phone/engine 副本已同步，基准已重建。
+- `check_drift.py`（2026-10-23 已删除，改为单一源码守卫）：phone/engine 副本已同步，基准已重建。
 
 教训：中文数字的单位展开（「万」连写）在**字节数**上永远是压缩的，真正的
 溢出入口是**纯数字串**（20 个以上连续中文数字）；模糊测试要覆盖「连续同段」
@@ -414,7 +486,7 @@ v3.19-embed 的 27 分是**五轮针对性补丁 + QAT**堆出来的，而且每
   直接 `exit(1)`。改成按 KV 模式分支。
 - `feng_jni.c` 把 `k_scale/v_scale` 非空当成硬条件：fp32/fp16 下它们是 NULL，
   会误报"内存不足"。
-- `phone/tools/check_drift.py` 的提示还写着 `board/main/`（v4.0 目录重构前的位置），
+- `check_drift.py`（2026-10-23 已删除，改为单一源码守卫） 的提示还写着 `board/main/`（v4.0 目录重构前的位置），
   实际常量早就是 `core/`；同步改掉。
 
 ### 命令

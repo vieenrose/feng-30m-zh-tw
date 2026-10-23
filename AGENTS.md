@@ -223,7 +223,7 @@
 | `core/` | **共享 C23 推理核心**（严格 C23、零堆、零全局构造）：`feng_llm` / `feng_quant` / `feng_model` / `feng_smp` / `feng_sample` / `feng_tokenizer` + 四个 tool（`feng_calc` / `feng_tools` / `feng_memory`）。**board / pc / phone 编的是同一份源码**，改这里三家全变 |
 | `board/` | ESP32-S3 固件工程：`main/`（IDF 组件，放 `main.c`、彩蛋 `feng_bonus`、GBK 表、PIE/bench）、`partitions.csv`、`sdkconfig*`、`flash.ps1`、`tools/export_model.py`、`model_export_4.0-embed/`（当前板端权重）。工程说明见 `docs/esp32-firmware.md` |
 | `pc/` | PC 驱动与验收套件（**C++23**）：`pc_chat` / `pc_kv_suite` / `pc_mt_suite` / `pc_check` / 各 tool 单测，GPU 后端 `feng_cuda.cu`，构建脚本 `build_pc_chat.ps1` / `build_pc_cuda.ps1` |
-| `phone/` | 手机端（Termux CLI + Android APK），`phone/engine/` 是 `core/` 的**派生副本**（带 `SOURCE.sha256` 溯源）；详见 `phone/README.md` |
+| `phone/` | 手机端（Termux CLI + Android APK）。**引擎编 `core/` 同一份源码**（`-DFENG_PHONE=1`），`phone/engine/` 只放手机独有的 `feng_phone.c/h`、`feng_neon.c/h`；详见 `phone/README.md` |
 | `tools/check_md.py`、`tools/check_docs.py` | 文档自检：前者查围栏/路径/过时表述，后者把**全部 md 的关键数字与实际产物对齐**（参数量、固件体积、各版评测分数、检索 loss） |
 | `tools/gen_compile_commands.py` | 生成仓库根的 `compile_commands.json`（编辑器代码提示数据），见「编辑器配置与代码提示」一节 |
 | `tools/bench_teacher_real.py` | 用**真实提示词**测教师服务吞吐（4 线程 / max_tokens 200，与生产同口径）。`scripts/bench_teacher_conc.py` 用的是 8 条五个字的短问题，测出来是纯 decode 上限（59.3 tok/s），**不能拿来跟生产日志里的 37.8 比** |
@@ -289,7 +289,7 @@ g++ -std=c++23 -O2 pc/pc_kv_suite.cpp feng_llm.o -Icore -lm       # 驱动 + 链
      `[layer][ctx][hidden]`。
    - 验证板端未受影响：`gcc -E -P -std=c23 -Icore -DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8 core/feng_llm.c`
      与 `git show HEAD:core/feng_llm.c` 的预处理结果 `diff` 必须为空。
-   - 手机端 `phone/engine/feng.h` **自己定义 `FENG_FP16_WEIGHTS 1`**；PC 在
+   - 手机端构建脚本显式传 `-DFENG_FP16_WEIGHTS=1`（单一源码后 `core/feng.h` 默认是 0）；PC 在
      `build_pc_chat.ps1` 的 `$cFlags`/`$cxxFlags` 里加 `-DFENG_FP16_WEIGHTS=1`
      （核心与驱动必须一致，否则 `feng_layer_t` 大小不同 → ABI 错位）。
 
@@ -329,33 +329,36 @@ g++ -std=c++23 -O2 pc/pc_kv_suite.cpp feng_llm.o -Icore -lm       # 驱动 + 链
 **维护要求**：重写命令链、清理"未引用代码"、或做体积优化时，别把它当成冗余删掉；
 它跟 `\help` 里那些命令一样是有意的。改 `main.c` 的命令分支时留意最后那个 `else`。
 
-### 手机端（`phone/`）的引擎是**派生副本** —— 改板端引擎必须记得同步
+### 手机端（`phone/`）与板端编**同一份**源码 —— 不再有派生副本
 
-`phone/engine/` **不是**从 `board/main/` 直接引用，而是一份拷贝
-（带 `phone/engine/SOURCE.sha256` 溯源清单记录原版哈希）。10 个共用文件里
-**6 个只差头部注释、4 个有实质改动（合计约 110 行）**：
+2026-10-23 之前 `phone/engine/` 是 `core/` 的手工拷贝（18 个文件、4909 行，
+`feng_llm.c` 分叉 458 行、`feng_smp.c` 246 行），同步靠人 `cp`，`check_drift.py`
+只能在漂移**之后**报警。这轮把它彻底删了：三端（板端 / PC / 手机）编同一份
+`core/*.c`，手机差异全部走 `-DFENG_PHONE=1` 的编译期分支：
 
-| 文件 | 手机端改了什么 |
+| 位置 | 手机端差异 |
 |---|---|
-| `feng_smp.c` | FreeRTOS 双核信号量 → pthread 线程池（手机 4~8 核） |
-| `feng_quant.c` | 加 aarch64 NEON（`vdotq_s32`）Q4 GEMV 内核 |
-| `feng.h` | 新增 `feng_gemv3_par` 声明（q/k/v、gate/up 合并提交） |
-| `feng_llm.c` | `FENG_PHONE_MAX_CTX` 解除板端 4096 上下文上限 |
+| `core/feng_smp.c` | `#elif defined(FENG_PHONE)`：FreeRTOS 双核信号量 → pthread 线程池（4~8 核，按行切分，逐位一致） |
+| `core/feng_quant.c` | `#if FENG_PHONE_NEON`：Q4 sdot / fp16 NEON GEMV 的分发 |
+| `core/feng_llm.c` | `#if FENG_PHONE_NEON`：q2 注意力 K/V 的 NEON 内核；`FENG_ATTN_PARTS` 手机默认 4 |
+| `core/feng.h` | `#ifdef FENG_PHONE` 包含 `feng_phone.h`，`FENG_MAX_SCORES` 跟随 `FENG_PHONE_MAX_CTX` |
+| `phone/engine/` | **只剩 4 个手机独有文件**：`feng_phone.c/h`（mmap 加载、时间源、线程池、NEON 开关）、`feng_neon.c/h`（aarch64 内核） |
 
-**改 `main/` 下任何被共用的文件后，必须同步这 10 个副本**，否则两边漂移。
-同步之后用 `phone/cli/build.sh` 验一遍：它复用 `pc/` 的
-**同一份 32 题矩阵套件源码**（不另写题表），所以在开发机上就能把两边的输出
-**逐字节对比**。当前基线：手机端 32 题 27/27 + 4/4，单线程与多线程输出均与板端一致。
+构建脚本已经改成从 `$CORE` 取源文件（`-Icore -Iphone/engine -DFENG_PHONE=1
+-DFENG_FP16_WEIGHTS=1`）。守卫脚本 `phone/tools/check_single_source.py` 会在
+`phone/engine/` 里又出现引擎副本时直接报错，CI 与 `check_all` 都跑它。
+
 **NEON int8 路径是近似的**：裸模型 `pc_mt_suite` 在 P30 Pro 上是 mem12 9/12、seq 9/10；
 `FENG_PHONE_NEON=0` 重编后回到 12/12、10/10。产品路径先过记忆 tool，不受影响；
 需要与板端逐字对拍时用 NEON 关。
 
 **手机 32k 是容量，不是可交互长文**：`FENG_PHONE_MAX_CTX` 默认已放到 32768
 （q2 KV 154MB；APK 默认 32k、失败回退 2048）。prefill 是 O(n²)：P30 Pro 上
-4064 token 预填从 **107 秒降到 58 秒**（q2 注意力 K 按 token、V 按 8 维 block
-分给 4 核；`FENG_Q2_PAR_K/V=0` 可关），8k 210 秒，外推 32k 仍约 **1 小时**。
+4064 token 预填从 **107 秒降到 58 秒**（q2 注意力按 head 切给 4 核；NEON 内核再摊一层）。
+8k 约 210 秒，外推 32k 仍约 **1 小时**。批量 GEMM 已实测证伪（见 CHANGELOG），
+再往上要动的是批量**注意力**。
 长文验收用 `phone_chat --ids-file`（预 tokenized，绕过 4KB prompt 缓冲和 O(n²) BPE），
-不要用普通输入喂长文。再往上需要批量/分块 GEMM 摊销权重读取，QAT 解决不了 prefill。
+不要用普通输入喂长文。
 
 > Windows（MSYS2）上也能编手机引擎：`feng_phone.c` 有 `_WIN32` 分支，走"读进堆"
 > 回退（MSYS2 没有 `sys/mman.h`），pthread/信号量由 winpthreads 提供。
@@ -373,7 +376,7 @@ g++ -std=c++23 -O2 pc/pc_kv_suite.cpp feng_llm.o -Icore -lm       # 驱动 + 链
 |---|---|---|
 | 固件 C23 核心（`board/main/*.c`） | 16 | **直接取自 ESP-IDF 自己的** `build/compile_commands.json`——自带上百条 `-I`、`sdkconfig.h` 与 `-DFENG_KV_Q2` 这类只在构建期存在的宏 |
 | PC 驱动（`pc/*.cpp`） | 15 | 脚本构造：`-std=c++23` + `-Icore` + q2 宏 |
-| 手机引擎（`phone/engine/*.c`） | 11 | 脚本构造：`-std=c23` + engine + MSYS2 的 ucrt64 include（winpthreads 供 pthread） |
+| 手机引擎（`core/*.c` + `phone/engine/feng_{phone,neon}.c`） | 11 | 脚本构造：`-std=c23 -DFENG_PHONE=1` + core/engine 两个 include + MSYS2 的 ucrt64 include（winpthreads 供 pthread） |
 | Android JNI | 1 | 同上；探测到 NDK 时补 `--target=aarch64-linux-android` |
 | CUDA（`feng_cuda.cu`） | 1 | 脚本探测 `CUDA_PATH`，否则取 NVIDIA 固定安装位置里版本号最大的 |
 
