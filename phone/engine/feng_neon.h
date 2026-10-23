@@ -54,8 +54,10 @@ void feng_neon_q4_gemv(const uint8_t *base, const int8_t *xq, const float *xscal
  * K 打分：scores[t] = (Σ_blk sk * Σ_{d in blk} qh[d] * deq(2bit)) * scale，
  *   每个 (t, blk) 两条 4 路 FMA 链 + 水平归约——累加分组与标量版不同，
  *   结果在 fp32 噪声级（~1e-7 相对）。
- * V 累加：只算 blk 指定的 8 维块，每个 d 按 t 递增累加、乘法分组与标量版
- *   完全相同（(st*lu)*sv），因此与标量路径**逐位一致**。
+ * V 累加：只算 blk 指定的 8 维块，每个 d 按 t 递增累加；乘法分组必须是
+ *   (st*sv)*lu（与标量 FENG_Q2_VFOLD=1 的分组逐字相同），这样才逐位一致。
+ *   写成 (st*lu)*sv 数学等价、浮点不等价——2026-10-23 实测把 mem12 从
+ *   11/12 打到 7/12，别改回去。
  * lut 是 256x4 的 2bit->float 查表（由 feng_llm.c 的 g_q2_lut 传入）。 */
 void feng_neon_q2_attn_k(const uint8_t *krow, const uint16_t *ksrow,
                          const float *qh, float *scores,

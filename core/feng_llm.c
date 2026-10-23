@@ -270,8 +270,8 @@ static void q2_attn_range(void *arg, int part, int nparts)
 #if FENG_ATTN_PROF
         const unsigned pc0 = (unsigned)esp_cpu_get_cycle_count();
 #endif
-#if FENG_PHONE_NEON && FENG_Q2_LUT
-        /* 手机端：一条 NEON 内核算完整个 t 区间（每 (t,blk) 两条 4 路 FMA 链 +
+#if FENG_PHONE_NEON && FENG_PHONE_NEON_ATTN && FENG_Q2_LUT
+        /* 手机端（需显式 -DFENG_PHONE_NEON_ATTN=1）：一条 NEON 内核算完整个 t 区间（每 (t,blk) 两条 4 路 FMA 链 +
          * 水平归约）。累加分组与标量链不同，结果在 fp32 噪声级（~1e-7 相对）；
          * 并行来自上层按 head 切分，所以这里不再嵌套线程。 */
         feng_neon_q2_attn_k(krow, ksrow, qh, scores, 0, c->pos + 1,

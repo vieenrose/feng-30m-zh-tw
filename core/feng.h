@@ -52,6 +52,15 @@ extern "C" {
 #ifdef FENG_PHONE
 #include "feng_phone.h"
 #endif
+
+/* q2 注意力 K 打分的 NEON 内核默认**关闭**。
+ * 原因：它的累加分组是 4 路并行，与标量链不同（~1e-7 相对差），实测在
+ * P30 Pro 上把「翻译-再见」从 Goodbye 翻成 Good morning（32 题 27→26）。
+ * V 段的 NEON 内核是逐位一致的（乘法分组与标量逐字相同），所以保留。
+ * 想要速度就 -DFENG_PHONE_NEON_ATTN=1，但必须重跑 32 题与长文套件。 */
+#ifndef FENG_PHONE_NEON_ATTN
+#define FENG_PHONE_NEON_ATTN 0
+#endif
 /* q2 注意力内层用字节 LUT 取代移位/掩码/整数转浮点（数值与原式完全一致，结果逐位不变）。
  * 默认开；-DFENG_Q2_LUT=0 可切回原实现做 A/B。 */
 #ifndef FENG_Q2_LUT

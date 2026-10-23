@@ -193,10 +193,13 @@ void feng_neon_q2_attn_v(const uint8_t *vrow, const uint16_t *vsrow,
         const float st = scores[t];
         const float sv = feng_f16_to_f32(vsrow[(size_t)t * nb + blk]);
         const uint8_t *bb = vrow + (size_t)t * qb + blk * 2;
-        const float32x4_t sv4 = vdupq_n_f32(sv);
-        const float32x4_t st4 = vdupq_n_f32(st);
-        a0 = vaddq_f32(a0, vmulq_f32(vmulq_f32(vld1q_f32(lut[bb[0]]), st4), sv4));
-        a1 = vaddq_f32(a1, vmulq_f32(vmulq_f32(vld1q_f32(lut[bb[1]]), st4), sv4));
+        /* 乘法分组必须与标量路径**逐字相同**：标量走 FENG_Q2_VFOLD 时是
+         * stv = st*sv; vacc += stv*lu —— 所以这里也先折 (st*sv) 再乘权重。
+         * 反过来写 (st*lu)*sv 在数学上等价、浮点上不等价，实测会把
+         * mem12 从 11/12 打到 7/12（P30 Pro，2026-10-23）。 */
+        const float32x4_t stv = vmulq_f32(vdupq_n_f32(st), vdupq_n_f32(sv));
+        a0 = vaddq_f32(a0, vmulq_f32(stv, vld1q_f32(lut[bb[0]])));
+        a1 = vaddq_f32(a1, vmulq_f32(stv, vld1q_f32(lut[bb[1]])));
     }
     vst1q_f32(vacc + blk * 8, a0);
     vst1q_f32(vacc + blk * 8 + 4, a1);

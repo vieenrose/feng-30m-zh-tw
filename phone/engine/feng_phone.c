@@ -55,7 +55,16 @@
 /* ------------------------------------------------------------------ */
 
 static int s_nthreads = 1;      /* 总线程数，含调用者 */
-static int s_neon_on = FENG_PHONE_NEON ? 1 : 0;
+/* NEON 内核（Q4 的 sdot 路径）**默认关闭**。
+ *
+ * 它不是逐位一致的：激活在进入内核前被量化成 int8（a8），误差会逐层累积。
+ * P30 Pro 实测（同模型、同套件、交替多轮）：
+ *   sdot 开：151 tok/s，mem12 7/12、mt 8/10、seq 10/10（合计 25/32）
+ *   标量 LUT：56 tok/s，mem12 11/12、mt 8/10、seq 9/10（合计 28/32）
+ * 速度差 2.7×，但多轮记忆类问题明显变差——30M 模型本来就贴着能力边界，
+ * 这点量化误差足以翻掉 4 道题。产品默认取准确的那条（也与板端/PC 数值一致）。
+ * 要速度：--neon 1 或 FENG_PHONE_NEON=1，并自行复跑 32 题 + mem12。 */
+static int s_neon_on = 0;
 static int s_inited;
 
 /* 在线 CPU 数：POSIX 走 sysconf，Windows 走 GetSystemInfo（MSYS2 没有 sysconf）。 */
