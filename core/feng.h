@@ -120,6 +120,12 @@ extern "C" {
  * 再按"块内最大真实分数"选 top-K 块，只保留这些块的贡献。
  * 它回答的是：**如果索引器完美，稀疏注意力还能保住多少分**。
  * 若 oracle 也掉分，说明这个预算下的稀疏化本身不成立，训练 indexer 也没用。 */
+/* 索引跨层复用（对应 V4.1-Flash 的 Reuse 模式）：只在第 0 层选一次块，
+ * 后面 10 层沿用同一份块掩码。作用是让"选块"的成本从 11 次摊成 1 次；
+ * 代价是后面各层看不到自己被漏掉的块。这里只用来量准确率影响。 */
+#ifndef FENG_SPARSE_REUSE
+#define FENG_SPARSE_REUSE 0
+#endif
 #ifndef FENG_SPARSE_ORACLE
 #define FENG_SPARSE_ORACLE 0
 #endif

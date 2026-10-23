@@ -319,10 +319,26 @@ static void q2_sparse_head(const q2_attn_ctx_t *c, int hh, int part)
     }
     int keep[FENG_SPARSE_TOP_K + FENG_SPARSE_SINK + FENG_SPARSE_RECENT];
     int nk = 0;
+#if FENG_SPARSE_REUSE
+    if (c->l > 0 && hh < SP_MAX_HEADS) {
+        /* Reuse：沿用第 0 层的块掩码 */
+        for (int b = 0; b < nblk; b++)
+            if (g_keep_bits[hh][b / 64] & (1ull << (b % 64))) keep[nk++] = b;
+    } else {
+#endif
     for (int b = 0; b < FENG_SPARSE_SINK && b < nblk; b++) keep[nk++] = b;
     for (int i = 0; i < ntop; i++) keep[nk++] = topb[i];
     for (int b = nblk - FENG_SPARSE_RECENT; b < nblk; b++)
         if (b >= FENG_SPARSE_SINK) keep[nk++] = b;
+#if FENG_SPARSE_REUSE
+        if (c->l == 0 && hh < SP_MAX_HEADS) {
+            for (int w = 0; w < FENG_MAX_SCORES / FENG_SPARSE_BLOCK / 64 + 1; w++)
+                g_keep_bits[hh][w] = 0;
+            for (int i = 0; i < nk; i++)
+                g_keep_bits[hh][keep[i] / 64] |= 1ull << (keep[i] % 64);
+        }
+    }
+#endif
 
     /* 3) 只对选中的块算完整分数 */
     float maxs = -1e30f;
@@ -399,6 +415,11 @@ static void q2_sparse_head(const q2_attn_ctx_t *c, int hh, int part)
 #if FENG_SPARSE_ORACLE
 /* 上限实验：全量打分 -> 按块内最大真实分数选块 -> 只在选中块上 softmax/V。
  * 复杂度仍是 O(n²)（打分没省），只用来测"完美索引器"的天花板。 */
+#if FENG_SPARSE_REUSE
+/* 跨层复用的块掩码：每 head 一份位图（块数 <= FENG_MAX_SCORES/64）。 */
+#define SP_MAX_HEADS 16
+static uint64_t g_keep_bits[SP_MAX_HEADS][FENG_MAX_SCORES / FENG_SPARSE_BLOCK / 64 + 1];
+#endif
 static void q2_oracle_head(const q2_attn_ctx_t *c, int hh, int part)
 {
     const int total = c->pos + 1;
@@ -451,10 +472,26 @@ static void q2_oracle_head(const q2_attn_ctx_t *c, int hh, int part)
     }
     int keep[FENG_SPARSE_TOP_K + FENG_SPARSE_SINK + FENG_SPARSE_RECENT];
     int nk = 0;
+#if FENG_SPARSE_REUSE
+    if (c->l > 0 && hh < SP_MAX_HEADS) {
+        /* Reuse：沿用第 0 层选出的块掩码（对应 V4.1-Flash 的 Reuse 模式） */
+        for (int b = 0; b < nblk; b++)
+            if (g_keep_bits[hh][b / 64] & (1ull << (b % 64))) keep[nk++] = b;
+    } else {
+#endif
     for (int b = 0; b < FENG_SPARSE_SINK && b < nblk; b++) keep[nk++] = b;
     for (int i = 0; i < ntop; i++) keep[nk++] = topb[i];
     for (int b = nblk - FENG_SPARSE_RECENT; b < nblk; b++)
         if (b >= FENG_SPARSE_SINK) keep[nk++] = b;
+#if FENG_SPARSE_REUSE
+        if (c->l == 0 && hh < SP_MAX_HEADS) {
+            for (int w = 0; w < FENG_MAX_SCORES / FENG_SPARSE_BLOCK / 64 + 1; w++)
+                g_keep_bits[hh][w] = 0;
+            for (int i = 0; i < nk; i++)
+                g_keep_bits[hh][keep[i] / 64] |= 1ull << (keep[i] % 64);
+        }
+    }
+#endif
 
     /* 只保留选中块的 exp，其余置 0 */
     float sum = 0.f;
