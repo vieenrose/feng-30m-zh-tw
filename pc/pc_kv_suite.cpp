@@ -181,7 +181,10 @@ int main(int argc, char **argv)
     const task_t *tasks = use_arith ? ARITH_TASKS : TASKS;
     const int n_tasks = use_arith ? (int)(sizeof(ARITH_TASKS) / sizeof(ARITH_TASKS[0])) : N_TASKS;
     const int n_needle = use_arith ? 0 : N_NEEDLE;
-    const int ctx = 2048;
+    /* 上下文长度：默认 2048（板端工作点）。要测稀疏注意力/长文衰减，用
+     * FENG_SUITE_CTX=8192 + 更大的 needle_chars 把 prompt 撑到 5k+ token，
+     * 否则块数太少、稀疏选择根本不会丢块。 */
+    const int ctx = getenv("FENG_SUITE_CTX") ? atoi(getenv("FENG_SUITE_CTX")) : 2048;
     const int max_new = 48;
     char path[512];
     size_t mlen = 0, tlen = 0, flen = 0;

@@ -91,6 +91,35 @@ extern "C" {
 /* 快速 exp（多项式 + 2^k 缩放，~20 条指令）替换 softmax / silu 里的 newlib expf
  * （实测 ~257 周期/次）。板端 softmax 从 169ms 降到 48ms（2048 ctx），
  * logits 差 ≤3.8e-6、32 题矩阵输出逐字相同；-DFENG_FAST_EXP=0 可切回 newlib。 */
+/* 块稀疏注意力（推理期，无需重训）：把长上下文的 O(n²) 注意力压到 O(n·k)。
+ * 做法是每块 64 token，用块内最后一个 token 当代表算粗分，永远保留前 SINK 块
+ * （attention sink）与最近 RECENT 块，其余按粗分取 top-K 块，只在这些块上算
+ * 完整分数/softmax/V。
+ *
+ * **默认关闭**：它会跳过一部分上下文，长文召回可能掉分。开启后必须重跑
+ * 128 题长文套件与「文中没有」拒答套件，掉了就退回。
+ * 8k 上下文时注意力占 prefill 的 76%，这是唯一能真正压掉它的手段
+ * （批量 GEMM 已被实测证伪）。 */
+#ifndef FENG_SPARSE_ATTN
+#define FENG_SPARSE_ATTN 0
+#endif
+#if FENG_SPARSE_ATTN
+#ifndef FENG_SPARSE_BLOCK
+#define FENG_SPARSE_BLOCK 64        /* 块大小（token） */
+#endif
+#ifndef FENG_SPARSE_TOP_K
+#define FENG_SPARSE_TOP_K 24        /* 除 sink/最近窗口外，最多再看多少块 */
+#endif
+#ifndef FENG_SPARSE_SINK
+#define FENG_SPARSE_SINK 2          /* 开头固定保留的块数（attention sink） */
+#endif
+#ifndef FENG_SPARSE_RECENT
+#define FENG_SPARSE_RECENT 2        /* 结尾固定保留的块数（最近上下文） */
+#endif
+#ifndef FENG_SPARSE_MIN_TOKENS
+#define FENG_SPARSE_MIN_TOKENS 1024 /* 短于这个长度不启用（省不了多少还多一次扫描） */
+#endif
+#endif
 #ifndef FENG_FAST_EXP
 #define FENG_FAST_EXP 1
 #endif
