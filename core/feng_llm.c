@@ -259,6 +259,7 @@ typedef struct {
 /* 每个 part 一份块分数缓冲（q2_attn_range 按 head 并行，不能共用）。 */
 static float g_blk_score[FENG_ATTN_PARTS][FENG_MAX_SCORES / FENG_SPARSE_BLOCK + 2];
 
+#if !FENG_SPARSE_ORACLE
 /* 单个 head 的块稀疏注意力，结果写进 c->attn[hh*hd ..]。
  * 与全量路径共用同一套 q2 解量化与 (st*sv)*lu 的 V 分组，所以被选中的位置
  * 数值逐位相同；差别只在"少看了一些块"。 */
@@ -393,6 +394,117 @@ static void q2_sparse_head(const q2_attn_ctx_t *c, int hh, int part)
     }
     for (int d = 0; d < c->hd; d++) c->attn[hh * c->hd + d] = vacc[d] * inv;
 }
+#endif  /* !FENG_SPARSE_ORACLE */
+
+#if FENG_SPARSE_ORACLE
+/* 上限实验：全量打分 -> 按块内最大真实分数选块 -> 只在选中块上 softmax/V。
+ * 复杂度仍是 O(n²)（打分没省），只用来测"完美索引器"的天花板。 */
+static void q2_oracle_head(const q2_attn_ctx_t *c, int hh, int part)
+{
+    const int total = c->pos + 1;
+    const int nblk = (total + FENG_SPARSE_BLOCK - 1) / FENG_SPARSE_BLOCK;
+    float *scores = c->scores + (size_t)part * FENG_MAX_SCORES;
+    float *bs = g_blk_score[part];
+    const float *qh = c->q + hh * c->hd;
+    const uint8_t *krow = (const uint8_t *)c->kv->k_cache
+                          + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->qb;
+    const uint16_t *ksrow = c->kv->k_scale + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->nb;
+
+    for (int b = 0; b < nblk; b++) bs[b] = -1e30f;
+    float maxs = -1e30f;
+    for (int t = 0; t < total; t++) {
+        const uint8_t *kh = krow + (size_t)t * c->qb;
+        const uint16_t *ks = ksrow + (size_t)t * c->nb;
+        float s = 0.f;
+        for (int blk = 0; blk < c->nb; blk++) {
+            const float sk = f16_to_f32_local(ks[blk]);
+            const uint8_t *bb = kh + blk * c->bw;
+            int d = blk * FENG_KV_Q2_BLOCK;
+            for (int j = 0; j < c->bw; j++) {
+                const float *lu = g_q2_lut[bb[j]];
+                for (int k4 = 0; k4 < 4; k4++) s += qh[d++] * lu[k4] * sk;
+            }
+        }
+        s *= c->scale;
+        scores[t] = s;
+        const int b = t / FENG_SPARSE_BLOCK;
+        if (s > bs[b]) bs[b] = s;
+        if (s > maxs) maxs = s;
+    }
+
+    float topv[FENG_SPARSE_TOP_K];
+    int topb[FENG_SPARSE_TOP_K];
+    int ntop = 0;
+    for (int b = FENG_SPARSE_SINK; b < nblk - FENG_SPARSE_RECENT; b++) {
+        const float v = bs[b];
+        if (ntop < FENG_SPARSE_TOP_K) {
+            int i = ntop++;
+            while (i > 0 && topv[i - 1] < v) { topv[i] = topv[i - 1]; topb[i] = topb[i - 1]; i--; }
+            topv[i] = v;
+            topb[i] = b;
+        } else if (v > topv[FENG_SPARSE_TOP_K - 1]) {
+            int i = FENG_SPARSE_TOP_K - 1;
+            while (i > 0 && topv[i - 1] < v) { topv[i] = topv[i - 1]; topb[i] = topb[i - 1]; i--; }
+            topv[i] = v;
+            topb[i] = b;
+        }
+    }
+    int keep[FENG_SPARSE_TOP_K + FENG_SPARSE_SINK + FENG_SPARSE_RECENT];
+    int nk = 0;
+    for (int b = 0; b < FENG_SPARSE_SINK && b < nblk; b++) keep[nk++] = b;
+    for (int i = 0; i < ntop; i++) keep[nk++] = topb[i];
+    for (int b = nblk - FENG_SPARSE_RECENT; b < nblk; b++)
+        if (b >= FENG_SPARSE_SINK) keep[nk++] = b;
+
+    /* 只保留选中块的 exp，其余置 0 */
+    float sum = 0.f;
+    for (int b = 0; b < nblk; b++) {
+        int t0 = b * FENG_SPARSE_BLOCK;
+        int t1 = t0 + FENG_SPARSE_BLOCK;
+        if (t1 > total) t1 = total;
+        int sel = 0;
+        for (int i = 0; i < nk; i++) if (keep[i] == b) { sel = 1; break; }
+        for (int t = t0; t < t1; t++) {
+            if (!sel) { scores[t] = 0.f; continue; }
+#if FENG_FAST_EXP
+            scores[t] = fast_expf(scores[t] - maxs);
+#else
+            scores[t] = expf(scores[t] - maxs);
+#endif
+            sum += scores[t];
+        }
+    }
+    const float inv = 1.f / sum;
+
+    float vacc[FENG_MAX_HEAD_DIM];
+    for (int d = 0; d < c->hd; d++) vacc[d] = 0.f;
+    const uint8_t *vrow = (const uint8_t *)c->kv->v_cache
+                          + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->qb;
+    const uint16_t *vsrow = c->kv->v_scale + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->nb;
+    for (int i = 0; i < nk; i++) {
+        int t0 = keep[i] * FENG_SPARSE_BLOCK;
+        int t1 = t0 + FENG_SPARSE_BLOCK;
+        if (t1 > total) t1 = total;
+        for (int t = t0; t < t1; t++) {
+            const uint8_t *vb = vrow + (size_t)t * c->qb;
+            const uint16_t *vs = vsrow + (size_t)t * c->nb;
+            const float st = scores[t];
+            for (int blk = 0; blk < c->nb; blk++) {
+                const float sv = f16_to_f32_local(vs[blk]);
+                const float stv = st * sv;
+                const uint8_t *bb = vb + blk * c->bw;
+                int d = blk * FENG_KV_Q2_BLOCK;
+                for (int j = 0; j < c->bw; j++) {
+                    const float *lu = g_q2_lut[bb[j]];
+                    for (int k4 = 0; k4 < 4; k4++) vacc[d++] += stv * lu[k4];
+                }
+            }
+        }
+    }
+    for (int d = 0; d < c->hd; d++) c->attn[hh * c->hd + d] = vacc[d] * inv;
+}
+#endif  /* FENG_SPARSE_ORACLE */
+
 #endif  /* FENG_SPARSE_ATTN */
 
 static void q2_attn_range(void *arg, int part, int nparts)
@@ -409,7 +521,11 @@ static void q2_attn_range(void *arg, int part, int nparts)
         const uint16_t *ksrow = c->kv->k_scale + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->nb;
 #if FENG_SPARSE_ATTN
         if (c->pos + 1 >= FENG_SPARSE_MIN_TOKENS) {
+#if FENG_SPARSE_ORACLE
+            q2_oracle_head(c, hh, part);
+#else
             q2_sparse_head(c, hh, part);
+#endif
             continue;
         }
 #endif

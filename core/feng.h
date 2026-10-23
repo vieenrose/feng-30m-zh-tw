@@ -116,6 +116,13 @@ extern "C" {
 #ifndef FENG_SPARSE_RECENT
 #define FENG_SPARSE_RECENT 2        /* 结尾固定保留的块数（最近上下文） */
 #endif
+/* 上限实验（只用于评估，不用于产品）：先用全量注意力算出真实分数，
+ * 再按"块内最大真实分数"选 top-K 块，只保留这些块的贡献。
+ * 它回答的是：**如果索引器完美，稀疏注意力还能保住多少分**。
+ * 若 oracle 也掉分，说明这个预算下的稀疏化本身不成立，训练 indexer 也没用。 */
+#ifndef FENG_SPARSE_ORACLE
+#define FENG_SPARSE_ORACLE 0
+#endif
 #ifndef FENG_SPARSE_MIN_TOKENS
 #define FENG_SPARSE_MIN_TOKENS 1024 /* 短于这个长度不启用（省不了多少还多一次扫描） */
 #endif
