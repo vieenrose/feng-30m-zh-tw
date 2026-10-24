@@ -208,9 +208,10 @@ int main(int argc, char **argv)
     feng_kv_t kv;
     memset(&kv, 0, sizeof(kv));
     kv.ctx = ctx;
-    const size_t kv_bytes = feng_kv_bytes(&m, ctx);
-    kv.k_cache = xmalloc(kv_bytes / 2 + 64);
-    kv.v_cache = xmalloc(kv_bytes / 2 + 64);
+    const size_t kv_bytes = feng_kv_bytes(&m, ctx);      /* 显示用总量（含 scale） */
+    const size_t kv_data = feng_kv_data_bytes(&m, ctx);  /* 单个 cache 的数据，不含 scale */
+    kv.k_cache = xmalloc(kv_data + 64);
+    kv.v_cache = xmalloc(kv_data + 64);
 #if FENG_KV_INT8 || FENG_KV_Q2
     const size_t n_sc = feng_kv_scale_slots(&m, ctx);
     kv.k_scale = (uint16_t *)xmalloc(n_sc * 2);
@@ -226,7 +227,7 @@ int main(int argc, char **argv)
     ws.k = (float *)xmalloc(sizeof(float) * h);
     ws.v = (float *)xmalloc(sizeof(float) * h);
     ws.attn = (float *)xmalloc(sizeof(float) * h);
-    ws.proj = (float *)xmalloc(sizeof(float) * ff);
+    ws.proj = (float *)xmalloc(sizeof(float) * h);   /* attn/down 投影都输出 hidden */
     ws.gate = (float *)xmalloc(sizeof(float) * ff);
     ws.up = (float *)xmalloc(sizeof(float) * ff);
     ws.ffn = (float *)xmalloc(sizeof(float) * ff);
@@ -237,6 +238,7 @@ int main(int argc, char **argv)
            ctx, kv_bytes / 1048576.0);
 
     int pass = 0, fail = 0, free_ok = 0, free_bad = 0, needle_ok = 0, needle_n = 0;
+    int skipped = 0;
     for (int t = 0; t < n_tasks + n_needle; t++) {
         char *user = NULL;
         const char *expect = NULL;
@@ -280,6 +282,7 @@ int main(int argc, char **argv)
         const int n = feng_tok_encode(&tok, text, ids, (int)(strlen(user) + 64));
         if (n + max_new > ctx) {
             printf("%-10s SKIP (prompt %d tokens)\n", name, n);
+            skipped++;
             free(ids); free(text); free(user); continue;
         }
 
@@ -322,8 +325,11 @@ int main(int argc, char **argv)
                expect ? expect : "-");
         free(ids); free(text); free(user);
     }
-    printf("SUMMARY mode=%s kv=%.2fMB  短任务 %d/%d + %d(自由)  长文召回 %d/%d\n",
+    printf("SUMMARY mode=%s kv=%.2fMB  短任务 %d/%d + %d(自由)  长文召回 %d/%d%s\n",
            KV_MODE, kv_bytes / 1048576.0, pass, pass + fail, free_ok + free_bad,
-           needle_ok, needle_n);
-    return fail > 0 ? 1 : 0;
+           needle_ok, needle_n, skipped ? "  SKIP>0" : "");
+    /* 失败关闭：短任务、长文召回、自由回答任一失败都非零退出。
+     * 旧实现只看 fail>0——needle 全错或自由回答退化时仍返回 0，外层会把
+     * “能跑”当成“通过”。skip 同理：没跑的检查不能算成功。 */
+    return (fail > 0 || needle_ok < needle_n || free_bad > 0 || skipped > 0) ? 1 : 0;
 }

@@ -8,7 +8,7 @@
 > - 本文按**时间倒序**排列（最新在最上）；当前发布 = **PC 权重 4.0**
 >   （`v4/patch_name_e5_lr5e-6`）+ **手机/ESP32 权重 4.0-embed**
 >   （`board/model_export_4.0-embed/`）+ **v4.0 引擎**
->   （严格 C23、四个 tool、固件 **281,248 B**）。
+>   （严格 C23、四个 tool、固件 **282,544 B**）。
 >   4.0-embed 由测试版 `4.0-20261018H` 发布，见顶部 4.0-embed 一节。
 > - 故事线与横向对比见 [`COMPARISON.md`](COMPARISON.md)；使用说明见 [`USAGE.md`](USAGE.md)。
 > - 每节的**失败尝试都保留**（含被证伪的路线），供后续避免重复踩坑；
@@ -20,6 +20,107 @@
 >   保留不改写（改写历史记录比留一个失效路径更糟），读的时候当成"当时的目录名"即可。
 >   旧版权重需要时从 GitHub Release 取（`ghfast.top` 镜像实测 11 MB/s）。
 >   `tools/check_md.py` 已把这三个前缀列为"允许缺失"。
+
+---
+
+## 代码审查修复第二批（2026-10-25）
+
+第一批（见下节）之后剩余 P1/P2 的收口。仍然按"先修内存安全与产物保护，再修验收假绿"的顺序，
+每条修完都跑了对应回归；证据都在本机实跑（不是静态推断）。
+
+**手机端可构建性（A11 / A34）**
+- `phone/android/app/CMakeLists.txt` 改成从仓库根的 `core/` 取 9 个核心源文件，
+  `phone/engine/` 只留 `feng_phone.c` / `feng_neon.c`；补上 `FENG_PHONE=1`、
+  `FENG_FP16_WEIGHTS=1`、`FENG_PHONE_MAX_CTX=32768`（与 `phone/cli/build.sh` 完全一致）。
+  旧版本仍指向 phone/engine 下已删除的核心副本，干净 checkout 上 CMake 配置阶段就 FATAL。
+- `phone/tools/check_android_native.sh`、`phone/cli/build_wsl_aarch64.sh` 同步单源化路径。
+- CI 的 aarch64 步骤从"只编 9 个 core 文件"改为**11 个实现 + 链接 phone_chat**，
+  NEON 与 pthread 线程池不再漏编。
+- 实测：NDK r27 工具链 `cmake` 配置 + 构建 libfeng.so 成功（13 个编译单元），
+  `llvm-nm` 8 个 `Java_com_feng_*` 符号齐全，`llvm-objdump` 里有 4 条 `sdot`。
+
+**手机端生命周期与交互（A16 / A17 / A20 / A23）**
+- `nativeFree` 改为"置 closing → 拿进程锁 → 只释放重型资源、保留句柄结构"：
+  等在锁上的在途调用拿到锁后看到 closing 直接返回，不再读已释放内存（残余 UAF）。
+- 所有入口（reset/memory/stats）在锁内检查 closing；prefill 循环加取消点（停止不必等整段预填）。
+- Kotlin：销毁时 `DisposableEffect` → `abort()` + 后台 `close()`（旧实现从不释放，重开累积映射/KV）；
+  `busy` 用 `AtomicBoolean` 兜底，nativeAsk 抛异常/返回负数也会解除；记忆/清空按钮 busy 时禁用并放后台。
+- assets 解包改成"版本戳（APK lastUpdateTime + asset 长度）+ `*.tmp` 校验后原子 rename"，
+  同尺寸换权重、下载中断都能识别并重解包。
+
+**训练产物与调度（A39 / A40 / A41）**
+- `v4_sft.py`：输出目录已有 final 目录 / `summary.json` / `train_log.jsonl` 时**默认拒绝**重跑（`--overwrite` 才覆盖）；
+  权重先写 `final.new`，成功后换入并保留 `final.bak`，保存失败可恢复。
+- 梯度累积改为"先按 epoch 生成批次计划，再按全局微批计数分组"：尾微批不再跨 epoch 残留，
+  每组严格 `accum` 份、总步数 = 分组数（旧实现会出现一组 3 份 loss 各除 2、缩放和 1.5）。
+- validation/loss 统计改用全部已对齐 label（旧实现漏掉 `assistant` 开头那一位）。
+- `finalize_student.py`：源/目的相同或互相包含时拒绝；复制到 `*.new` 再换入。
+- 实测：`make_groups` 5 样本 / batch2 / accum2 / 2 epoch → 3 组、每组 2 批；`steps_cap` 生效。
+
+**PC 引擎与验收（A31 / A32 / A33 / A44 / A45 / A52）**
+- `check_all.py`：多轮套件必须 `returncode==0` 才算 PASS；`--require-model` 下缺
+  mt_suite/kv_suite/pc_check 二进制记 FAIL（不再静默 SKIP）；默认权重优先 `model_export_4.0-embed`
+  并打印 `model.bin` 的 sha256（可追溯测的是哪一份）。
+- `pc_kv_suite`：短任务、长文召回、自由回答、SKIP 任一失败都非零退出。
+- `pc_check`：逐元素 `isfinite` 检查（NaN 会让 `fabs(NaN) > max` 恒假，旧实现显示 MATCH）；
+  dump 写失败也非零退出；`proj` 按 hidden 分配。
+- `build_pc_chat.ps1`：`FENG_USE_OMP=1`/`/openmp`（MinGW `-fopenmp`）同时传给 **C 核心**——
+  GEMV 的 `#pragma omp parallel for` 在 `feng_quant.c`，旧脚本只给驱动开，核心仍串行。
+  顺带修了两处会让默认 MSVC 构建直接失败的坑：`Invoke-Native` 手工拼命令行时
+  `/Fo...\` 的结尾反斜杠吃掉结束引号（cl 报 D8036），改成按 Windows 规则转义；
+  MSVC 的 OpenMP 2.0 不接受 `for (int o = ...)` 声明（C3015），把循环变量提到外面
+  （`feng_quant.c` 两处，GCC/Clang 同样接受）。
+
+**手机 CLI（A13 / A15 / A22 / A28 / A29）**
+- `k_cache/v_cache` 按 `feng_kv_data_bytes()` 分配（q2/32k 从 231 MiB 降到 154 MiB）、`proj` 按 hidden；
+- prompt 超 4096 字节明确拒绝（不再截断后继续推理）；提前返回时 `out[0]=0`；
+- 记忆落盘改用 `feng_mem_dirty()`：`别记我的名字了` 这类不带"忘"字的删除也会持久化。
+  实测：写入 tombstone → 重启后 `我叫什么名字？` 仍答「我不记得你的名字了。」
+
+**板端（A38 / A42 / A43）**
+- `main/CMakeLists.txt` 显式 `-std=gnu23`（排在 IDF 的 `-std=gnu17` 之后）+ `main.c`
+  `_Static_assert(__STDC_VERSION__ >= 202000L)`。**不能用严格 `-std=c23`**：IDF 的
+  xtensa 头文件用 GNU `asm`，实测报 `'asm' undeclared`；`core/*.c` 仍按严格 C23 书写。
+- `gbk.c` 的 UTF-8 校验拒绝 `cp > 0x10FFFF`。
+- `tok/s` 改为**本轮 decode** 吞吐（旧实现分子含累计上下文位置，连续多轮越报越高）；
+  `ms/token` 同口径。
+- 实测：`idf.py build` 通过，固件 **282,544 B**（+1,296 B，仍在 307,392 B 预算内）。
+- 顺带发现 `board/build` 的 CMake 缓存留着历史 A/B 配置（`FENG_FAST_EXP` /
+  `FENG_GEMV_MADD` / `FENG_Q2_VFOLD` 全 OFF）——发布固件一直在跑慢速路径，
+  文档里的体积也是那套配置的数字。这次显式按发布默认（三项 ON、双核注意力）重建：
+  **282,544 B**（关彩蛋 **282,336 B**，彩蛋占 208 B）。
+
+**评测判分（A36 / A37）**
+- 否定句不再被 forbidden 子串误杀（`不会骗人` 命中 `会骗`）。
+- 纯数字期望加数词边界（`水在100度结冰` 不再命中 `0`，`一周有17天` 不再命中 `7`）。
+- 序列题要求完整区间与顺序（`3，4。` 不再算通过），补齐 `从 3 数到 8` / `把 1 到 5 倒着数`。
+- 判别边界收进回归用例 `tests/test_eval_judge.py`（11 条正/负例，只依赖标准库，CI 直接跑）。
+
+**分发与训练脚本（A46 / A47 / A48 / A53 / A54 / A55）**
+- `make_release.py` 的引擎包补 `board/CMakeLists.txt`（IDF 顶层入口）。
+- `publish_gitee_release.py`：附件上传失败聚合为非零退出；dist 里没有 zip 也失败。
+- `verify_weights.py`：清单 schema 校验（非空、必需字段、64 位 sha256、仓库内相对路径）。
+- `v3_7_kv_qat.py`：q2/q4 的 scale 在转 half 后再 `clamp_min(1e-7)`（零块不再 0/0→NaN）；
+  `--wqat` 时 `chunked_lm_loss` 显式使用量化后的 lm_head（新增 `head_weight` 参数），
+  长文阶段不再绕过量化。
+- `eval_longctx_many.py` / `make_longctx_ids.py`：按 token 预算先留问句、再插针，
+  目标一定落在最终窗口内，并断言解码结果包含埋点（旧实现先插后尾裁，靠前的针会被裁掉）。
+- `tests/fuzz`：输入改精确分配（ASAN 才能抓越过 NUL 的读）；模型模糊新增**结构化合法种子**
+  （1 层小模型 + 目录项）与随机变异，覆盖张量绑定/尺寸校验深路径。
+
+**验证**
+- `python tools/check_all.py`（文档自检 → 默认 MSVC 两趟构建 + tool 单测 → 多轮/32 题/算术 →
+  fp32 logits）**全部通过**；MinGW 路径单独跑过一遍。
+- `pc_check` 对 4.0-embed：`max|diff|=0.0000`、argmax MATCH（MSVC 与 MinGW 两套产物都验过）。
+- `pc_kv_suite_q2b8`：短任务 **27/27**、长文召回 **4/4**、算术 **21/21**。
+- `pc_mt_suite` 对 4.0-embed：mt 7/10、mem 8/12、seq 9/10（= 新的验收下限；退出码按此返回 0）。
+- clang ASAN/UBSAN：fuzz calc 3000 轮、tools 3000 轮、model 300 轮零报告（改完 `feng_quant.c`
+  后再跑 500/500/200 轮仍干净）。
+- 手机 host 构建（`phone/cli/build.sh`，gcc 16.2）通过；记忆 tombstone 跨进程生效。
+- NDK r27 aarch64：CMake 配置 + `libfeng.so` 链接通过；JNI 符号与 sdot 指令齐全。
+- 固件 `idf.py build` 通过，**282,544 B**（`-std=gnu23`；`core/*.c` 仍按严格 C23 书写）。
+- QAT 数值：零块 q2/q4 前向量有限；`head_weight` 路径 loss 有限且可反传。
+- 长文构造：4k/32k 正负样本、两个脚本的埋点都在最终窗口内（token 级断言）。
 
 ---
 

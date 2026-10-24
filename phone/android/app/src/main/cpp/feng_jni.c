@@ -38,6 +38,7 @@ typedef struct {
     int nl_id;
     int abort_flag;
     int closing;
+    int released;           /* 资源已释放（结构体本身保留给可能在途的调用者） */
     char mem_path[512];     /* 持久化记忆：模型目录下的 mem.txt */
 } jni_session;
 
@@ -288,6 +289,9 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
     float *logits = NULL;
     const double t0 = (double)feng_phone_uptime_us();
     for (int i = 0; i < n; i++) {
+        /* prefill 也响应“停止”：长输入下每个 token 都是 O(n)，不给取消点
+         * 用户点停止后还要等整段 prefill 才退出。 */
+        if (__atomic_load_n(&s->abort_flag, __ATOMIC_RELAXED)) break;
         logits = feng_forward_ex(&s->m, &s->kv, &s->ws, ids[i], pos++, i + 1 == n);
         if (!logits) break;
     }
@@ -349,6 +353,7 @@ Java_com_feng_feng30m_FengNative_nativeReset(JNIEnv *env, jclass cls, jlong hand
     jni_session *s = (jni_session *)(intptr_t)handle;
     if (!s) return;
     pthread_mutex_lock(&g_engine_lock);
+    if (s->closing) { pthread_mutex_unlock(&g_engine_lock); return; }
     s->kv.len = 0;
     feng_mem_clear();
     mem_store_save(s);
@@ -363,6 +368,7 @@ Java_com_feng_feng30m_FengNative_nativeMemory(JNIEnv *env, jclass cls, jlong han
     if (!s) return NULL;
     char snap[256];
     pthread_mutex_lock(&g_engine_lock);
+    if (s->closing) { pthread_mutex_unlock(&g_engine_lock); return NULL; }
     feng_mem_snapshot(snap, sizeof(snap));
     pthread_mutex_unlock(&g_engine_lock);
     return (*env)->NewStringUTF(env, snap);
@@ -375,11 +381,14 @@ Java_com_feng_feng30m_FengNative_nativeStats(JNIEnv *env, jclass cls, jlong hand
     jni_session *s = (jni_session *)(intptr_t)handle;
     if (!s) return NULL;
     char buf[256];
+    pthread_mutex_lock(&g_engine_lock);
+    if (s->closing) { pthread_mutex_unlock(&g_engine_lock); return NULL; }
     snprintf(buf, sizeof(buf),
              "ctx %d/%d ｜ 线程 %d/%d ｜ NEON %s ｜ KV %.2f MB",
              s->kv.len, s->ctx, feng_phone_threads(), feng_phone_cpus(),
              feng_phone_neon_on() ? "开" : "关",
              (double)feng_kv_bytes(&s->m, s->ctx) / 1048576.0);
+    pthread_mutex_unlock(&g_engine_lock);
     return (*env)->NewStringUTF(env, buf);
 }
 
@@ -393,20 +402,41 @@ Java_com_feng_feng30m_FengNative_nativeBackend(JNIEnv *env, jclass cls, jlong ha
     return (*env)->NewStringUTF(env, buf);
 }
 
-/* 统一释放：成功路径与初始化失败路径共用，避免 32k 分配失败时泄漏 154MB KV。 */
-static void session_free(jni_session *s)
+/* 释放会话占用的重型资源（KV / workspace / mmap / tokenizer）。
+ * 结构体本身不释放：可能还有线程拿着同一个句柄等在 g_engine_lock 上，
+ * 它拿到锁后会读 s->closing 并直接返回；如果这里把结构体也 free 掉，
+ * 那条路径就是 use-after-free（A19 的残余竞态）。一次会话只泄漏 ~1KB
+ * 的句柄结构，且 App 生命周期内通常只关闭一次，这个代价远小于 UAF。 */
+static void session_release(jni_session *s)
 {
-    if (!s) return;
+    if (!s || s->released) return;
+    s->released = 1;
+    s->closing = 1;
     feng_phone_unload(s->mblob, s->mlen);
     feng_phone_unload(s->tblob, s->tlen);
+    s->mblob = NULL;
+    s->tblob = NULL;
+    s->mlen = s->tlen = 0;
     free(s->kv.k_cache);
     free(s->kv.v_cache);
     free(s->kv.k_scale);
     free(s->kv.v_scale);
+    s->kv.k_cache = NULL;
+    s->kv.v_cache = NULL;
+    s->kv.k_scale = NULL;
+    s->kv.v_scale = NULL;
     free(s->ws.x); free(s->ws.xn); free(s->ws.q); free(s->ws.k); free(s->ws.v);
     free(s->ws.attn); free(s->ws.proj); free(s->ws.gate); free(s->ws.up);
     free(s->ws.ffn); free(s->ws.logits); free(s->ws.scratch);
+    memset(&s->ws, 0, sizeof(s->ws));
     feng_tok_free(&s->tok);
+}
+
+/* 初始化失败路径专用：没有别的线程见过这个句柄，可以连结构体一起释放。 */
+static void session_free(jni_session *s)
+{
+    if (!s) return;
+    session_release(s);
     free(s);
 }
 
@@ -416,11 +446,11 @@ Java_com_feng_feng30m_FengNative_nativeFree(JNIEnv *env, jclass cls, jlong handl
     (void)env; (void)cls;
     jni_session *s = (jni_session *)(intptr_t)handle;
     if (!s) return;
-    /* 拿进程锁 = 等在途 ask/reset 结束；置 closing 后不会再接新请求。
+    /* 先置 closing（无锁）让新调用立刻退出，再拿进程锁等待在途 ask/reset 结束。
      * 旧实现直接 free，生成中关闭就是 use-after-free。 */
+    __atomic_store_n(&s->closing, 1, __ATOMIC_RELEASE);
     pthread_mutex_lock(&g_engine_lock);
-    s->closing = 1;
-    session_free(s);
+    session_release(s);
     pthread_mutex_unlock(&g_engine_lock);
 }
 

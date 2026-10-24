@@ -71,7 +71,9 @@ def engine_files() -> list[tuple[Path, str]]:
     add_dir(ROOT / "pc", "pc", ("*.cpp", "*.cu", "*.h", "*.ps1", "*.py", "*.txt"))
     add_dir(ROOT / "board" / "main", "board/main", ("*.c", "*.h", "*.S", "CMakeLists.txt"))
     add_dir(ROOT / "board" / "tools", "board/tools", ("*.py",))
-    add_dir(ROOT / "board", "board", ("partitions.csv", "sdkconfig*", "flash.ps1"))
+    # 板端顶层 CMakeLists 是 idf.py 的入口：漏了它，解压后的引擎包没法按说明重建
+    # 固件（A46）。
+    add_dir(ROOT / "board", "board", ("CMakeLists.txt", "partitions.csv", "sdkconfig*", "flash.ps1"))
     return out
 
 

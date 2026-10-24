@@ -104,6 +104,27 @@ def make_batches(samples, batch: int, rng: random.Random):
     return out
 
 
+def make_groups(samples, batch: int, accum: int, epochs: float, rng: random.Random,
+                steps_cap: int = 0):
+    """按 epoch 生成批次，再按**全局微批计数**分组（ accum 份一组 = 一次 optimizer step）。
+
+    旧训练循环用 epoch 内的 (bi+1)%accum 判断，尾微批会跨轮残留：同一组里塞进
+    3 份 loss 却各除 accum（缩放和 1.5），步数也和日志对不上（A40）。
+    这里每组严格 accum 份，尾部不足一组的微批丢弃（drop_last），返回
+    (groups, plan)，plan 用于统计每轮步数。
+    """
+    accum = max(1, accum)
+    epochs_n = max(1, math.ceil(epochs))
+    plan = []
+    for e in range(epochs_n):
+        for b in make_batches(samples, batch, rng):
+            plan.append((e, b))
+    groups = [plan[i:i + accum] for i in range(0, len(plan) - accum + 1, accum)]
+    if steps_cap:
+        groups = groups[:steps_cap]
+    return groups, plan
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--init", required=True, help="初始 HF 目录（v4.0 是 v4/base）")
@@ -122,7 +143,20 @@ def main() -> int:
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"],
                     help="cuda（默认）或 cpu。cpu 只用于在教师占卡时冒烟验证代码路径")
     ap.add_argument("--seed", type=int, default=20261015)
+    ap.add_argument("--overwrite", action="store_true",
+                    help="允许覆盖已完成的 <out>/final（默认拒绝：保护已训练好的权重）")
     a = ap.parse_args()
+
+    # 已有产物默认拒绝重跑：旧实现在开始时就 mkdir(final)，结束时 rmtree(final)
+    # 再保存——同目录重跑会先删掉上一版权重与日志，保存失败就不可恢复（A39）。
+    # 放在加载模型之前：拒绝时不该先占 100+ MB 显存/内存。
+    out = Path(a.out)
+    final = out / "final"
+    if not a.overwrite and (final.exists() or (out / "summary.json").exists()
+                            or (out / "train_log.jsonl").exists()):
+        print(f"!! {out} 已有训练产物（final/ 或 summary.json）；"
+              f"确认要覆盖请加 --overwrite（或用新的 --out）", flush=True)
+        return 2
 
     from transformers import AutoTokenizer, Qwen3ForCausalLM
 
@@ -184,7 +218,8 @@ def main() -> int:
                             weight_decay=0.05, fused=(dev.type == "cuda"))
 
     out = Path(a.out)
-    (out / "final").mkdir(parents=True, exist_ok=True)
+    final = out / "final"
+    out.mkdir(parents=True, exist_ok=True)
     logf = (out / "train_log.jsonl").open("w", encoding="utf-8")
     sumf = (out / "summary.json")
 
@@ -211,16 +246,28 @@ def main() -> int:
             ti = torch.tensor(bi, dtype=torch.long, device=dev)
             tl = torch.tensor(bl, dtype=torch.long, device=dev)
             loss = chunked_lm_loss(model, ti, tl, chunk=512)
-            tot += float(loss) * int((tl[:, 1:] != -100).sum())
-            n += int((tl[:, 1:] != -100).sum())
+            # 权重必须用**全部**已对齐 label 数：chunked_lm_loss 的均值分母是
+            # (tl != -100)，旧实现按 tl[:,1:] 统计，assistant 开头那一位被漏掉，
+            # 多 batch 加权会偏小（A41）。
+            sup = int((tl != -100).sum())
+            tot += float(loss) * sup
+            n += sup
         model.train()
         return tot / max(1, n)
 
-    steps_per_epoch = max(1, len(samples) // a.batch)
-    total = max(1, int(steps_per_epoch * a.epochs / max(1, a.accum)))
-    if a.steps_cap:
-        total = min(total, a.steps_cap)
-    print(f"每轮 {steps_per_epoch} 批，共 {total} 步（accum={a.accum}，"
+    # 调度计划：先把每个 epoch 的批次全部生成好，再**按全局微批计数**分组。
+    # 旧实现用 epoch 内的 (bi+1)%accum 判断，尾微批（每轮批数不整除 accum）
+    # 会残留到下一轮：同一组里塞进 3 份 loss 却各除 2（缩放和 1.5），
+    # 步数也和日志对不上（A40）。现在每组固定 accum 份、总步数精确等于分组数。
+    epochs_n = max(1, math.ceil(a.epochs))
+    groups, plan = make_groups(samples, a.batch, a.accum, a.epochs, rng, a.steps_cap)
+    total = len(groups)
+    if total == 0:
+        print("有效微批不足一个 accum 组，退出", flush=True)
+        logf.close()
+        return 1
+    steps_per_epoch = max(1, len(plan) // max(1, a.accum) // epochs_n)
+    print(f"每轮约 {steps_per_epoch} 步，共 {total} 步（accum={a.accum}，"
           f"等效 batch {a.batch*a.accum}）", flush=True)
 
     t_start = time.time()
@@ -228,11 +275,12 @@ def main() -> int:
     seen_tok = 0
     loss_run = None
     peak = 0.0
-    for epoch in range(max(1, math.ceil(a.epochs))):
-        batches = make_batches(samples, a.batch, rng)
-        for bi, idx in enumerate(batches):
-            if step >= total:
-                break
+    last_epoch = 0
+    for group in groups:
+        if step >= total:
+            break
+        for epoch, idx in group:
+            last_epoch = epoch
             rows = [samples[i] for i in idx]
             L = max(len(r[0]) for r in rows)
             bid = np.full((len(rows), L), pad_id, dtype=np.int64)
@@ -243,7 +291,7 @@ def main() -> int:
                 blab[k, :len(lab)] = lab
             ti = torch.tensor(bid, dtype=torch.long, device=dev)
             tl = torch.tensor(blab, dtype=torch.long, device=dev)
-            nl = int((tl[:, 1:] != -100).sum())
+            nl = int((tl != -100).sum())
             # chunked_lm_loss 返回的**已经是每 token 平均损失**（内部除以了非 -100 的
             # token 数），所以这里不要再做任何长度缩放——第一版乘了 (batch/nl)，
             # 等于又除了一个 ~76，日志里 loss 显示成 0.14（假的）。
@@ -252,41 +300,52 @@ def main() -> int:
             seen_tok += nl
             loss_run = float(loss.detach()) if loss_run is None else 0.98 * loss_run + 0.02 * float(loss.detach())
 
-            if (bi + 1) % a.accum == 0:
-                step += 1
-                if step <= a.warmup:
-                    lr = a.lr * step / max(1, a.warmup)
-                else:
-                    prog = (step - a.warmup) / max(1, total - a.warmup)
-                    lr = a.lr * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * prog)))
-                for g in opt.param_groups:
-                    g["lr"] = lr
-                gn = float(torch.nn.utils.clip_grad_norm_(params, 1.0))
-                opt.step()
-                opt.zero_grad(set_to_none=True)
-                if dev.type == "cuda":
-                    peak = max(peak, torch.cuda.max_memory_allocated() / 2**30)
-                el = time.time() - t_start
-                rec = {"step": step, "total": total, "epoch": epoch + 1,
-                       "loss": round(loss_run, 4), "lr": lr, "grad_norm": round(gn, 3),
-                       "loss_tokens": seen_tok, "elapsed_min": round(el / 60, 2),
-                       "peak_gib": round(peak, 3)}
-                logf.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                logf.flush()
-                if step % 20 == 0 or step == total:
-                    print(f"  step {step}/{total} ep{epoch+1} loss={loss_run:.4f} "
-                          f"lr={lr:.2e} gn={gn:.2f} {el/60:.1f}min peak={peak:.2f}GiB", flush=True)
-                if a.save_every and step % a.save_every == 0:
-                    save(out / "rolling" / f"step{step}")
-                if step >= total:
-                    break
+        step += 1
+        if step <= a.warmup:
+            lr = a.lr * step / max(1, a.warmup)
+        else:
+            prog = (step - a.warmup) / max(1, total - a.warmup)
+            lr = a.lr * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * prog)))
+        for g in opt.param_groups:
+            g["lr"] = lr
+        gn = float(torch.nn.utils.clip_grad_norm_(params, 1.0))
+        opt.step()
+        opt.zero_grad(set_to_none=True)
+        if dev.type == "cuda":
+            peak = max(peak, torch.cuda.max_memory_allocated() / 2**30)
+        el = time.time() - t_start
+        rec = {"step": step, "total": total, "epoch": last_epoch + 1,
+               "loss": round(loss_run, 4), "lr": lr, "grad_norm": round(gn, 3),
+               "loss_tokens": seen_tok, "elapsed_min": round(el / 60, 2),
+               "peak_gib": round(peak, 3)}
+        logf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        logf.flush()
+        if step % 20 == 0 or step == total:
+            print(f"  step {step}/{total} ep{last_epoch+1} loss={loss_run:.4f} "
+                  f"lr={lr:.2e} gn={gn:.2f} {el/60:.1f}min peak={peak:.2f}GiB", flush=True)
+        if a.save_every and step % a.save_every == 0:
+            save(out / "rolling" / f"step{step}")
 
     vloss = eval_val()
     el = time.time() - t_start
-    final = out / "final"
+    # 先写到 final.new，成功后再原子换入：中途 OOM/磁盘满不会先删掉上一版权重。
+    staged = out / "final.new"
+    if staged.exists():
+        shutil.rmtree(staged)
+    save(staged)
+    backup = out / "final.bak"
+    if backup.exists():
+        shutil.rmtree(backup)
     if final.exists():
-        shutil.rmtree(final)
-    save(final)
+        final.rename(backup)
+    try:
+        staged.rename(final)
+    except OSError:
+        if backup.exists() and not final.exists():
+            backup.rename(final)        # 换入失败：恢复上一版
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)           # 新版权重落地后才删备份
     summary = {
         "init": a.init, "data": a.data, "device": a.device, "samples": len(samples),
         "val_samples": len(val_samples),

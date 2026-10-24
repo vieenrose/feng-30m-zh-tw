@@ -105,19 +105,46 @@ jobs:
       - name: 单一源码守卫（phone/engine 不得出现引擎副本）
         run: python3 phone/tools/check_single_source.py
 
+      # A36/A37：否定句误杀、数词边界、序列完整性——这些判分边界直接决定头条分数，
+      # 不能再靠人工抽查。只依赖标准库（torch 用空壳顶掉）。
+      - name: 判分器回归（strict-v7 边界）
+        run: python3 tests/test_eval_judge.py
+
       # 交叉编译：证明 aarch64 分支（NEON 内核 + pthread 线程池）真的能编过。
       # 只编译不运行——运行需要 qemu 与真机，见 tests/kernels 与 phone/cli/verify.sh。
-      - name: 手机端 aarch64 交叉编译（NEON 分支）
+      # 2026-10-23 单源化之后必须把 phone/engine 的两个文件也带上并真正链接：
+      # 只编 core 的 9 个文件会漏掉 feng_phone.c / feng_neon.c（A34）。
+      - name: 手机端 aarch64 交叉编译（NEON 分支 + 链接）
         run: |
           set -euo pipefail
-          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
-          for f in feng_model feng_llm feng_quant feng_smp feng_tokenizer \
-                   feng_sample feng_calc feng_tools feng_memory; do
-            aarch64-linux-gnu-gcc-14 -std=c23 -O2 -Wall -Wextra -DFENG_PHONE=1 \
+          # Ubuntu 24.04 的默认包是 gcc-13（不认 -std=c23），优先装 14；装不上再退回默认包
+          sudo apt-get install -y -qq gcc-14-aarch64-linux-gnu || \
+              sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+          A64="$(command -v aarch64-linux-gnu-gcc-14 || command -v aarch64-linux-gnu-gcc)"
+          echo "交叉编译器：$A64（$($A64 -dumpversion)）"
+          mkdir -p /tmp/a64
+          "$A64" -std=c23 -O2 -Wall -Wextra \
+              -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 \
               -DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8 -Icore -Iphone/engine \
-              -c core/$f.c -o /tmp/a64_$f.o
+              -c core/feng_model.c -o /tmp/a64/feng_model.o
+          for f in feng_llm feng_quant feng_smp feng_tokenizer \
+                   feng_sample feng_calc feng_tools feng_memory; do
+            "$A64" -std=c23 -O2 -Wall -Wextra \
+              -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 \
+              -DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8 -Icore -Iphone/engine \
+              -c core/$f.c -o /tmp/a64/$f.o
           done
-          echo "aarch64（FENG_PHONE=1）9/9 编译通过"
+          for f in feng_phone feng_neon; do
+            "$A64" -std=c23 -O2 -Wall -Wextra \
+              -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 \
+              -DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8 -Icore -Iphone/engine \
+              -c phone/engine/$f.c -o /tmp/a64/$f.o
+          done
+          "$A64" -std=c23 -O2 -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 \
+              -DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8 -Icore -Iphone/engine \
+              phone/cli/phone_chat.c /tmp/a64/*.o -o /tmp/a64/phone_chat -pthread -lm
+          file /tmp/a64/phone_chat
+          echo "aarch64（FENG_PHONE=1）11/11 编译 + phone_chat 链接通过"
 
       - name: 文档自检（干净 clone 口径）
         run: |

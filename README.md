@@ -11,7 +11,7 @@ where the four tools — arithmetic / time / random / memory — are answered de
 > **Current release (updated 2026-10-18)**
 >
 > - Weights: PC = **4.0** (`v4/patch_name_e5_lr5e-6`) ｜ phone / ESP32 = **4.0-embed** (`board/model_export_4.0-embed/`)
-> - Engine: **v4.0 / strict C23** (embedded side: zero heap, zero global constructors; PC side: C++23 + CUDA); board firmware **281,248 B**, 22,944 B smaller than the C++23 build in v3.20
+> - Engine: **v4.0 / strict C23** (embedded side: zero heap, zero global constructors; PC side: C++23 + CUDA); board firmware **282,544 B**, 21,648 B smaller than the C++23 build in v3.20
 > - On board: q2/2048 matrix **27/27 + 4/4**, tools **13/13**, memory **24/24**, **2.33 tok/s** (firmware counter, best short-reply figure)
 > - Board weights 4.0-embed: PPL **102.99**, held-out 200 **85/200**, long context **108/128**; same size 14.93MB
 > - Identity line (verbatim): 「我是 feng，一个由个人开发者 jiaheng 独立开发训练的 AI」
@@ -111,7 +111,7 @@ The model no longer learns arithmetic (pure arithmetic samples are filtered from
 | Speed | **2.33 tok/s** (firmware counter, best short-context/short-reply figure; per-token varies with context/reply length) |
 | Memory | weights flash mmap (no PSRAM); KV + activations 9.62 MB PSRAM; internal SRAM only kernel and workspace |
 
-**Re-tested on device 2026-10-18** (firmware 280,736 B + 4.0-embed; engine hardened 2026-10-22, firmware now 281,248 B): tools **13/13**,
+**Re-tested on device 2026-10-18** (firmware 280,736 B + 4.0-embed; engine hardened 2026-10-22, firmware was 281,248 B): tools **13/13**,
 memory **24/24**, 10-turn multi-turn **10/10**; the identity line is verbatim
 「我是 feng，一个由个人开发者 jiaheng 独立开发训练的 AI」.
 
@@ -119,7 +119,7 @@ memory **24/24**, 10-turn multi-turn **10/10**; the identity line is verbatim
 
 - **Strict C23 core** (`-std=c23`, shared by board and PC) + **C++23 drivers** (`pc/*.cpp`) and **CUDA** (`feng_cuda.cu`, nvcc); two-pass compilation (the two `/std:` flags are mutually exclusive, see AGENTS.md)
 - **Zero heap**: the 8 core objects contain no `malloc/free/new/delete`, no exception/RTTI symbols; the only allocation is the tokenizer's one-time PSRAM load at startup; `.init_array` is empty for all components (no global constructors)
-- **Size**: 281,248 B, 26,144 B smaller than the C version (307,392 B); non-hot modules `-Os`, hot inference paths stay `-O2`
+- **Size**: 282,544 B, 24,848 B smaller than the C version (307,392 B); non-hot modules `-Os`, hot inference paths stay `-O2`
 - **Performance**: board short context 2.33 tok/s, q2/2048 single forward **1.58 s** (two cores split by head; single core 2.20 s); **PC CPU multithreaded 654 tok/s** (157 single-thread → 4.2×,
   `build_pc_chat.ps1` enables OpenMP by default, row-level parallelism, byte-identical output); CUDA build generates 322 tok/s;
   C/Python tool parity **173 cases** + 4 unit-test suites all pass

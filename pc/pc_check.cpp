@@ -113,7 +113,7 @@ int main(int argc, char **argv)
     ws.k = (float *)xmalloc(sizeof(float) * h);
     ws.v = (float *)xmalloc(sizeof(float) * h);
     ws.attn = (float *)xmalloc(sizeof(float) * h);
-    ws.proj = (float *)xmalloc(sizeof(float) * ff);
+    ws.proj = (float *)xmalloc(sizeof(float) * h);   /* down/attn 投影都输出 hidden */
     ws.gate = (float *)xmalloc(sizeof(float) * ff);
     ws.up = (float *)xmalloc(sizeof(float) * ff);
     ws.ffn = (float *)xmalloc(sizeof(float) * ff);
@@ -140,8 +140,12 @@ int main(int argc, char **argv)
         if (x > 0) max_allowed = x;
     }
     double maxdiff = 0, sum = 0;
+    int nonfinite = 0;
     int argmax_c = feng_argmax(logits, v), argmax_r = feng_argmax(refl, v);
     for (int i = 0; i < v; i++) {
+        /* NaN 必须显式拒绝：fabs(NaN) > maxdiff 恒为 false，旧实现会让污染数值
+         * 以 max|diff|=0 的假象通过 MATCH。 */
+        if (!isfinite(logits[i]) || !isfinite(refl[i])) { nonfinite++; continue; }
         const double d = fabs((double)logits[i] - (double)refl[i]);
         if (d > maxdiff) maxdiff = d;
         sum += d;
@@ -149,14 +153,22 @@ int main(int argc, char **argv)
     printf("logits check: n=%d max|diff|=%.4f (limit %.2f) mean|diff|=%.5f  "
            "argmax c=%d ref=%d %s\n", v, maxdiff, max_allowed, sum / v, argmax_c, argmax_r,
            argmax_c == argmax_r ? "MATCH" : "MISMATCH");
-    if (argc > 2) {                      /* optional: dump C logits for the torch-side check */
+    if (nonfinite) {
+        printf("logits check: %d 个非有限值（NaN/Inf），拒绝通过\n", nonfinite);
+        return 2;
+    }    if (argc > 2) {                      /* optional: dump C logits for the torch-side check */
         snprintf(path, sizeof(path), "%s", argv[2]);
         FILE *fo = fopen(path, "wb");
-        if (fo) {
-            fwrite(logits, sizeof(float), (size_t)v, fo);
-            fclose(fo);
-            printf("dumped C logits -> %s\n", path);
+        if (!fo) {
+            fprintf(stderr, "cannot open dump %s\n", path);
+            return 2;
         }
+        const size_t w = fwrite(logits, sizeof(float), (size_t)v, fo);
+        if (fclose(fo) != 0 || w != (size_t)v) {
+            fprintf(stderr, "dump 写入不完整：%s\n", path);
+            return 2;
+        }
+        printf("dumped C logits -> %s\n", path);
     }
 
     printf("greedy continuation: ");

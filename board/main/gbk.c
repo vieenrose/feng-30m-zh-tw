@@ -68,6 +68,7 @@ static int utf8_seq_len(const unsigned char *s, int n)
     if (need == 2 && cp < 0x800) return 0;
     if (need == 3 && cp < 0x10000) return 0;
     if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+    if (cp > 0x10FFFF) return 0;       /* F4 90 80 80 这类编码超出行星 Unicode 范围 */
     return need + 1;
 }
 

@@ -31,6 +31,13 @@
 #include <esp_timer.h>
 #include "gbk.h"
 
+/* 构建期断言：IDF 会把目录级 `-std=gnu17` 排在组件选项之前，若哪天顺序又变回
+ * gnu17，这里会直接编译失败，而不是悄悄退化成 C17（见 main/CMakeLists.txt）。
+ * 语言级别仍是 C23（-std=gnu23 只是带 GNU 扩展）。
+ * 阈值用 202000L 而不是 202311L：IDF 的 xtensa gcc 14.2 对 -std=gnu23 报的是
+ * 草案值 202000L（主机 gcc 16 报 202311L），两者都 >= C2x。 */
+_Static_assert(__STDC_VERSION__ >= 202000L, "firmware must build as C23 (see main/CMakeLists.txt)");
+
 static const char *TAG = "feng";
 #define MODEL_PART "model"
 #define TOK_PART "tokdata"
@@ -424,7 +431,9 @@ static void setup_model(void)
     s_ws.q = ps_alloc_f32(hidden);
     s_ws.k = ps_alloc_f32(hidden);
     s_ws.v = ps_alloc_f32(hidden);
-    s_ws.proj = ps_alloc_f32(s_model.hdr.ffn);
+    /* proj 是 attn/down 投影的输出，宽度是 hidden，不是 ffn（旧值在 ff<hidden 的
+     * 模型上会堆越界；当前 ff=896 > h=448 只是恰好没踩到）。 */
+    s_ws.proj = ps_alloc_f32(hidden);
     s_ws.gate = ps_alloc_f32(s_model.hdr.ffn);
     s_ws.up = ps_alloc_f32(s_model.hdr.ffn);
     s_ws.logits = ps_alloc_f32(s_model.hdr.vocab);
@@ -612,8 +621,11 @@ static int generate(const int *prompt, int np, char *out, int out_max, int keep)
     } else if (pn > 0) {
         write_text(pend, pn);
     }
-    const int64_t dt = esp_timer_get_time() - t0;
-    const float tps = (float)(pos) * 1e6f / (float)dt;
+    const int64_t t_end = esp_timer_get_time();
+    const int64_t dt_dec = t_end - t_prefill;
+    /* tok/s 是**本轮 decode** 的吞吐：分子只能是本轮新生成的 token 数。
+     * 旧实现用累计位置 pos（含历史上下文与 prefill），连续多轮会越报越高。 */
+    const float tps = (n_gen > 0 && dt_dec > 0) ? (float)n_gen * 1e6f / (float)dt_dec : 0.0f;
     if (keep) {
         /* 把模型自己吐出的 <|im_end|> 与换行补进 KV，下一轮才能无缝续接；
            若本轮是被长度截断的，也补一个 im_end 收尾，语义上等于结束这一轮。
@@ -629,9 +641,9 @@ static int generate(const int *prompt, int np, char *out, int out_max, int keep)
     /* 和 pc_chat 同一口径：尾行给出上下文占用与速度，方便用户/脚本判断 */
     out_printf("\n>>END (ctx %d/%d, %.2f tok/s)\n", s_kv.len, MAX_CTX, tps);
     fflush(stdout);
-    ESP_LOGI(TAG, "prompt %d | gen %d | prefill %lld ms | total %lld ms | %.2f tok/s (%.0f ms/token)",
-             np, n_gen, (t_prefill - t0) / 1000, dt / 1000, tps,
-             (float)dt / 1000.0f / (float)n_gen);
+    ESP_LOGI(TAG, "prompt %d | gen %d | prefill %lld ms | decode %lld ms | %.2f tok/s (%.0f ms/token)",
+             np, n_gen, (t_prefill - t0) / 1000, dt_dec / 1000, tps,
+             n_gen > 0 ? (float)dt_dec / 1000.0f / (float)n_gen : 0.0f);
     return written;
 }
 

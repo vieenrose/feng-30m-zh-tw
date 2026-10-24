@@ -57,17 +57,52 @@ def _body_text(tok, target_tokens: int) -> str:
     return unit * reps
 
 
+def _ids(tok, text: str) -> list[int]:
+    return tok(text, add_special_tokens=False)["input_ids"]
+
+
+def _splice_window(tok, keep: int, inserts: list[str], tail: str, rng) -> tuple[list[int], list[int]]:
+    """把若干段文本按 **token** 精确插进正文，返回 (ids, 每段插入的起始 token 下标)。
+
+    先定 tail，再按 token 预算造正文，最后 `ins` 一定落在最终 ids 内——
+    旧实现先造 `keep+256` 再 `ids[-keep:]`，插在靠前位置的目标会被裁掉，
+    正样本变成不可回答（A55）。这里改写后还会断言每段文本能在解码结果里找到。
+    """
+    tail_ids = _ids(tok, tail)
+    budget = keep - len(tail_ids)
+    parts = [_ids(tok, s) for s in inserts]
+    body_budget = budget - sum(len(p) for p in parts)
+    if body_budget < 256:
+        raise RuntimeError(f"ctx={keep} 太小，放不下正文 + {len(inserts)} 条埋点")
+    body = _ids(tok, _body_text(tok, body_budget))[:body_budget]
+    pos = sorted(rng.randrange(int(0.1 * body_budget), int(0.9 * body_budget))
+                 for _ in inserts)
+    out, at, prev = [], [], 0
+    for p, part in zip(pos, parts):
+        p = max(prev, min(p, body_budget))
+        out.extend(body[prev:p])
+        at.append(len(out))
+        out.extend(part)
+        prev = p
+    out.extend(body[prev:])
+    out.extend(tail_ids)
+    if len(out) != keep:
+        raise RuntimeError(f"窗口长度不符：{len(out)} != {keep}")
+    text = tok.decode(out)
+    for s in inserts:
+        if s not in text:
+            raise RuntimeError(f"埋点不在最终输入里：{s!r}")
+    return out, at
+
+
 def build_sample(tok, ctx: int, seed: int) -> dict:
     """按旧协议造一题：随机密码 + 随机位置的埋点 + 截断到 ctx **tokens**。"""
     rng = random.Random(seed)
     code = f"{rng.randint(10000, 99999)}"
     fact = f"（重要信息：保险柜密码是 {code}。）"
     keep = max(1, ctx - GEN_RESERVE)
-    text = _body_text(tok, keep)
-    pos = rng.randrange(int(0.1 * len(text)), int(0.9 * len(text)))
-    text = text[:pos] + fact + text[pos:]
-    ids = tok(text + QUESTION, add_special_tokens=False)["input_ids"][-keep:]
-    return {"code": code, "ids": ids, "needle_frac": round(pos / len(text), 3)}
+    ids, at = _splice_window(tok, keep, [fact], QUESTION, rng)
+    return {"code": code, "ids": ids, "needle_frac": round(at[0] / len(ids), 3)}
 
 
 OTHER_FACTS = [                       # 正文里有别的信息，但没有被问的那条
@@ -114,34 +149,29 @@ def build_multi(tok, ctx: int, seed: int, negative: bool) -> dict:
     rng = random.Random(seed)
     name, tpl, q_txt, gen = KINDS[rng.randrange(len(KINDS))]
     keep = max(1, ctx - GEN_RESERVE)
-    text = _body_text(tok, keep + 256)
     code = None if negative else _make_value(rng, gen)
+    inserts, main_at = [], 0
     if not negative:                     # 正样本：埋目标事实
-        fact = tpl.format(c=code)
-        p = rng.randrange(int(0.1 * len(text)), int(0.9 * len(text)))
-        text = text[:p] + fact + text[p:]
-    for k in KINDS:                      # 正负样本都撒别的类别的事实当诱饵
+        inserts.append(tpl.format(c=code))
+        main_at = 0
+    # 正负样本都撒别的类别的事实当诱饵（插在后面，位置随机）
+    for k in KINDS:
         if k[0] == name:
             continue
-        fact = k[1].format(c=_make_value(rng, k[3]))
-        p = rng.randrange(0, max(1, len(text)))
-        text = text[:p] + fact + text[p:]
+        inserts.append(k[1].format(c=_make_value(rng, k[3])))
     q = f"<|im_start|>user\n{q_txt}<|im_end|>\n<|im_start|>assistant\n"
-    ids = tok(text + q, add_special_tokens=False)["input_ids"][-keep:]
-    return {"code": code, "ids": ids, "needle_frac": -1.0 if negative else 0.5,
-            "kind": name}
+    ids, at = _splice_window(tok, keep, inserts, q, rng)
+    frac = -1.0 if negative else round(at[main_at] / len(ids), 3)
+    return {"code": code, "ids": ids, "needle_frac": frac, "kind": name}
 
 
 def build_negative(tok, ctx: int, seed: int) -> dict:
     """负样本：正文里**没有**保险柜密码，正确行为是说明"没有提到"，而不是编一个数字。"""
     rng = random.Random(seed)
     keep = max(1, ctx - GEN_RESERVE)
-    text = _body_text(tok, keep + 256)
-    for _ in range(rng.randint(1, 3)):            # 埋一些**别的**信息当诱饵
-        fact = rng.choice(OTHER_FACTS).format(c=f"{rng.randint(10000, 99999)}")
-        p = rng.randrange(0, max(1, len(text)))
-        text = text[:p] + fact + text[p:]
-    ids = tok(text + QUESTION, add_special_tokens=False)["input_ids"][-keep:]
+    inserts = [rng.choice(OTHER_FACTS).format(c=f"{rng.randint(10000, 99999)}")
+               for _ in range(rng.randint(1, 3))]
+    ids, _ = _splice_window(tok, keep, inserts, QUESTION, rng)
     return {"code": None, "ids": ids, "needle_frac": -1.0}
 
 

@@ -175,7 +175,9 @@ def main() -> int:
     dist = (ROOT / a.dist).resolve()
     files = sorted(dist.glob(f"*{a.tag}*.zip"))
     if not files:
-        print(f"  ⚠ {dist} 里没有 {a.tag} 的 zip")
+        print(f"  ✗ {dist} 里没有 {a.tag} 的 zip")
+        return 1
+    failed = []
     for f in files:
         size = f.stat().st_size
         if size > SKIP_OVER:
@@ -189,10 +191,15 @@ def main() -> int:
             print(f"  ✓ {f.name}（{size/1048576:.2f} MB）")
         else:
             print(f"  ✗ {f.name}：{code} {str(resp)[:160]}")
+            failed.append(f.name)
 
     code, rel = get(f"{API}/repos/{OWNER_REPO}/releases/tags/{a.tag}", token)
     if code == 200 and isinstance(rel, dict):
         print(f"\n完成：{rel.get('html_url')}")
+    # 附件失败必须非零退出：否则自动化会把“release 缺附件”当成发布成功（A47）。
+    if failed:
+        print(f"\n✗ {len(failed)} 个附件上传失败：{', '.join(failed)}")
+        return 1
     return 0
 
 

@@ -83,9 +83,10 @@ int main(int argc, char **argv)
     feng_kv_t kv;
     memset(&kv, 0, sizeof(kv));
     kv.ctx = ctx; kv.len = 0;
-    const size_t kv_bytes = feng_kv_bytes(&m, ctx);
-    kv.k_cache = xmalloc(kv_bytes / 2 + 64);
-    kv.v_cache = xmalloc(kv_bytes / 2 + 64);
+    const size_t kv_bytes = feng_kv_bytes(&m, ctx);      /* 显示用总量（含 scale） */
+    const size_t kv_data = feng_kv_data_bytes(&m, ctx);  /* 单个 cache 的数据，不含 scale */
+    kv.k_cache = xmalloc(kv_data + 64);
+    kv.v_cache = xmalloc(kv_data + 64);
 #if FENG_KV_INT8 || FENG_KV_Q2
     const size_t n_sc = feng_kv_scale_slots(&m, ctx);
     kv.k_scale = (uint16_t *)xmalloc(n_sc * 2);
@@ -101,7 +102,7 @@ int main(int argc, char **argv)
     ws.k = (float *)xmalloc(sizeof(float) * h);
     ws.v = (float *)xmalloc(sizeof(float) * h);
     ws.attn = (float *)xmalloc(sizeof(float) * h);
-    ws.proj = (float *)xmalloc(sizeof(float) * ff);
+    ws.proj = (float *)xmalloc(sizeof(float) * h);   /* attn/down 投影都输出 hidden */
     ws.gate = (float *)xmalloc(sizeof(float) * ff);
     ws.up = (float *)xmalloc(sizeof(float) * ff);
     ws.ffn = (float *)xmalloc(sizeof(float) * ff);

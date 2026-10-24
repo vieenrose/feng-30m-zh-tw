@@ -15,6 +15,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+CORE="$ROOT/core"
 ENG="$HERE/../engine"
 PC="$ROOT/pc"
 MODEL="${MODEL:-$ROOT/board/model_export_4.0-embed}"
@@ -36,9 +37,10 @@ for t in "$CC" "$QEMU"; do
 done
 
 KVFLAGS="-DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8"
-BASE="-std=c23 -pthread -I$ENG $KVFLAGS -O2 -static"
-HOT="feng_llm.c feng_quant.c feng_smp.c feng_sample.c feng_phone.c feng_neon.c"
-COLD="feng_model.c feng_tokenizer.c feng_calc.c feng_tools.c feng_memory.c"
+BASE="-std=c23 -pthread -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 -I$CORE -I$ENG $KVFLAGS -O2 -static"
+# 9 个共享核心（core/）+ 2 个手机独有文件（phone/engine/）
+HOT="$CORE/feng_llm.c $CORE/feng_quant.c $CORE/feng_smp.c $CORE/feng_sample.c $ENG/feng_phone.c $ENG/feng_neon.c"
+COLD="$CORE/feng_model.c $CORE/feng_tokenizer.c $CORE/feng_calc.c $CORE/feng_tools.c $CORE/feng_memory.c"
 
 mkdir -p "$OUT/n" "$OUT/a8" "$LOGDIR"
 
@@ -47,12 +49,13 @@ build_variant() {        # build_variant <子目录> <额外的 -D>
     local extra="$*"
     local objs=""
     for f in $HOT $COLD; do
-        "$CC" $BASE $extra -c "$ENG/$f" -o "$dir/${f%.c}.o" || return 1
-        objs="$objs $dir/${f%.c}.o"
+        "$CC" $BASE $extra -c "$f" -o "$dir/$(basename "${f%.c}").o" || return 1
+        objs="$objs $dir/$(basename "${f%.c}").o"
     done
     "$CC" $BASE $extra "$HERE/phone_chat.c" $objs -o "$dir/phone_chat" -lm || return 1
     if command -v "$CXX" >/dev/null 2>&1 && [ -f "$PC/pc_kv_suite.cpp" ]; then
-        "$CXX" -std=c++23 -pthread -I"$ENG" $KVFLAGS $extra -O2 -static \
+        "$CXX" -std=c++23 -pthread -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 -I"$CORE" -I"$ENG" \
+            $KVFLAGS $extra -O2 -static \
             "$PC/pc_kv_suite.cpp" $objs -o "$dir/pc_kv_suite_phone" -lm || return 1
     fi
 }

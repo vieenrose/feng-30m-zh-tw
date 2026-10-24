@@ -39,7 +39,10 @@ def q2_block8_ste(x: torch.Tensor) -> torch.Tensor:
     d = x.shape[-1]
     orig = x
     xb = x.reshape(*x.shape[:-1], d // block, block).float()
+    # clamp 的下界小于 fp16 最小 subnormal（~6e-8），转 half 后会下溢成 0，
+    # 零块就变成 0/0 -> NaN（A53）。half 之后再夹一次，保证 scale > 0。
     scale = (xb.abs().amax(dim=-1, keepdim=True).clamp_min(1e-8) / 1.5).half().float()
+    scale = scale.clamp_min(1e-7)
     q = torch.round(xb / scale + 1.5).clamp_(0, 3)
     dq = (q - 1.5) * scale
     dq = xb + (dq - xb).detach()
@@ -78,6 +81,7 @@ def q4_block64_ste(w: torch.Tensor) -> torch.Tensor:
     assert in_f % 64 == 0
     wb = w.reshape(out_f, in_f // 64, 64).float()
     scale = (wb.abs().amax(dim=-1, keepdim=True) / 7.0).clamp_min(1e-8).half().float()
+    scale = scale.clamp_min(1e-7)         # fp16 下溢成 0 会让零块产生 NaN（A53）
     q = torch.round(wb / scale).clamp_(-8, 7)
     dq = (q * scale).reshape(out_f, in_f)
     return w + (dq - w).detach()
@@ -185,6 +189,13 @@ def main() -> None:
 
     dest = Path(args.out)
     dest.mkdir(parents=True, exist_ok=True)
+    # W-QAT 下输出投影也必须吃 Q4 噪声：install_wqat 只换了 Linear/embedding 的
+    # forward，chunked_lm_loss 直接读 model.lm_head.weight，会绕过量化（A54）。
+    def lm_loss(inp: torch.Tensor, lab: torch.Tensor) -> torch.Tensor:
+        from student_utils import chunked_lm_loss
+        hw = q4_block64_ste(model.lm_head.weight) if args.wqat else None
+        return chunked_lm_loss(model, inp, lab, chunk=512, head_weight=hw)
+
     ckpt_step = 0
     def save_rolling(step: int) -> None:
         """训练中途落盘；32k 长跑 OOM/断点后不用从头再来。"""
@@ -239,7 +250,6 @@ def main() -> None:
     # ---- 长文 QAT：在检索窗口上带着 q2 噪声练长上下文（只对答案 token 算 loss） ----
     if args.retr:
         from torch.nn.attention import SDPBackend, sdpa_kernel
-        from student_utils import chunked_lm_loss
         specs = []
         for item in args.retr_n.split(","):
             parts = item.split(":")
@@ -270,7 +280,7 @@ def main() -> None:
                     lab[mt_[:, 1:] == 0] = -100
                     with torch.autocast("cuda", dtype=torch.bfloat16), \
                             sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION]):
-                        loss_all = chunked_lm_loss(model, inp, lab, chunk=512)
+                        loss_all = lm_loss(inp, lab)
                     (loss_all / accum).backward()
                     ls += float(loss_all.detach())
                 gn = float(torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0))

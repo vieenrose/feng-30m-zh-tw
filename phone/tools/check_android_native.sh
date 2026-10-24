@@ -12,6 +12,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+CORE="$ROOT/core"
 ENG="$HERE/../engine"
 JNI="$ROOT/phone/android/app/src/main/cpp/feng_jni.c"
 
@@ -30,13 +31,17 @@ OUT="${OUT:-$HERE/../cli/build-android}"
 mkdir -p "$OUT"
 
 KVFLAGS="-DFENG_KV_Q2=1 -DFENG_KV_Q2_BLOCK=8"
-CFLAGS="-std=c23 -O2 -fPIC -Wall -I$ENG $KVFLAGS"
+# 与 app/CMakeLists.txt / phone/cli/build.sh 同一套宏：核心按 FENG_PHONE 分叉
+# （pthread 线程池 / NEON 分派），权重格式是 fp16。
+CFLAGS="-std=c23 -O2 -fPIC -Wall -DFENG_PHONE=1 -DFENG_FP16_WEIGHTS=1 \
+        -DFENG_PHONE_MAX_CTX=32768 -I$CORE -I$ENG $KVFLAGS"
 
 echo "== NDK clang: $($CC --version | head -1)"
 echo "== 目标 ABI: ${ABI}${API}（arm64-v8a）"
 
 OBJS=""
-for f in "$ENG"/*.c; do
+# 9 个共享核心 + 2 个手机独有文件（phone/engine 不再有核心副本）
+for f in "$CORE"/*.c "$ENG"/*.c; do
     o="$OUT/$(basename "${f%.c}").o"
     echo "   CC $(basename "$f")"
     "$CC" $CFLAGS -c "$f" -o "$o"

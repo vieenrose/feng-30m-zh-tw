@@ -119,7 +119,6 @@ static void run_calc_known_bad(char *ans, size_t ans_sz, int *fails)
 static int fuzz_calc(int rounds, char *ans, size_t ans_sz)
 {
     int fails = 0;
-    char buf[512];
     run_calc_known_bad(ans, ans_sz, &fails);
 
     /* 入口防御：NULL / 零长 / 负长度 */
@@ -129,8 +128,16 @@ static int fuzz_calc(int rounds, char *ans, size_t ans_sz)
     if (feng_calc_answer("1+1", ans, -5) != 0) { fprintf(stderr, "[FAIL] answer_sz<0 未拒绝\n"); fails++; }
 
     for (int i = 0; i < rounds; i++) {
-        gen_cn_string(buf, (int)sizeof(buf));
-        const int r = feng_calc_answer(buf, ans, (int)ans_sz);
+        char big[512];
+        gen_cn_string(big, (int)sizeof(big));
+        /* 精确分配：ASAN 才能在**越过 NUL**时立刻报错。以前的用例都写在
+         * 512 字节大数组里，红区永远碰不到（A35，A01 就是这么漏掉的）。 */
+        const size_t len = strlen(big);
+        char *exact = (char *)malloc(len + 1);
+        if (!exact) { fprintf(stderr, "[FAIL] oom\n"); fails++; break; }
+        memcpy(exact, big, len + 1);
+        const int r = feng_calc_answer(exact, ans, (int)ans_sz);
+        free(exact);
         if (r != 0 && r != 1) { fprintf(stderr, "[FAIL] 返回 %d\n", r); fails++; }
         /* 输出必须是 NUL 结尾且在缓冲区内 */
         if (r == 1 && ans[ans_sz - 1] != 0 && strlen(ans) >= ans_sz) {
@@ -171,10 +178,16 @@ static int fuzz_tools(int rounds, char *ans, size_t ans_sz)
     char buf[256];
     for (int i = 0; i < rounds; i++) {
         gen_cn_string(buf, (int)sizeof(buf));
-        (void)feng_time_answer(buf, ans, (int)ans_sz);
-        (void)feng_random_answer(buf, ans, (int)ans_sz);
-        (void)feng_mem_answer(buf, ans, (int)ans_sz);
-        (void)feng_mem_learn(buf);
+        // 精确分配（含截断 UTF-8 的末尾），让 ASAN 能抓到越过 NUL 的读
+        const size_t len = strlen(buf);
+        char *exact = (char *)malloc(len + 1);
+        if (!exact) { fprintf(stderr, "[FAIL] oom\n"); fails++; break; }
+        memcpy(exact, buf, len + 1);
+        (void)feng_time_answer(exact, ans, (int)ans_sz);
+        (void)feng_random_answer(exact, ans, (int)ans_sz);
+        (void)feng_mem_answer(exact, ans, (int)ans_sz);
+        (void)feng_mem_learn(exact);
+        free(exact);
     }
     if (feng_time_answer(NULL, ans, (int)ans_sz) != 0) { fprintf(stderr, "[FAIL] time NULL 未拒绝\n"); fails++; }
     if (feng_random_answer(NULL, ans, (int)ans_sz) != 0) { fprintf(stderr, "[FAIL] random NULL 未拒绝\n"); fails++; }
@@ -182,16 +195,84 @@ static int fuzz_tools(int rounds, char *ans, size_t ans_sz)
 }
 
 /* ---- 模型头部模糊：随机字节不能崩、不能越界读 ---- */
+
+static void put32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
+static void put64(uint8_t *p, uint64_t v) { memcpy(p, &v, 8); }
+static void putf32(uint8_t *p, float v) { memcpy(p, &v, 4); }
+
+/* 造一个**结构上合法**的模型镜像（1 层、小尺寸），用来穿过 magic/header/dir
+ * 校验，进入张量绑定与尺寸校验的深路径。旧 fuzz 的随机字节几乎全死在
+ * magic 上，等于没测到这些分支（A35）。返回长度，buf 由调用方精确分配。 */
+static size_t build_seed_model(uint8_t **out)
+{
+    enum { NL = 1, H = 64, NH = 1, HD = 64, FF = 128, VOCAB = 256, NTEN = 2 + 11 * NL };
+    static const char *const lnames[11] = {
+        "attn_norm.weight", "ffn_norm.weight", "attn_q.weight", "attn_k.weight",
+        "attn_v.weight", "attn_output.weight", "attn_q_norm.weight", "attn_k_norm.weight",
+        "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight",
+    };
+    char names[NTEN][32];
+    uint32_t s0[NTEN], s1[NTEN];
+    snprintf(names[0], 32, "tok_embd.weight");     s0[0] = VOCAB; s1[0] = H;
+    snprintf(names[1], 32, "output_norm.weight");  s0[1] = H;     s1[1] = 0;
+    for (int l = 0; l < NL; l++) {
+        for (int k = 0; k < 11; k++) {
+            const int i = 2 + l * 11 + k;
+            snprintf(names[i], 32, "blk.%d.%s", l, lnames[k]);
+            switch (k) {
+            case 2: case 3: case 4: case 5: s0[i] = H; s1[i] = H; break;
+            case 6: case 7: s0[i] = HD; s1[i] = 0; break;
+            case 8: case 9: s0[i] = FF; s1[i] = H; break;
+            case 10: s0[i] = H; s1[i] = FF; break;
+            default: s0[i] = H; s1[i] = 0; break;
+            }
+        }
+    }
+    const size_t dir_bytes = 44 + (size_t)NTEN * 68;
+    uint64_t off = dir_bytes;
+    size_t total = dir_bytes;
+    for (int i = 0; i < NTEN; i++) {
+        total += (size_t)s0[i] * (s1[i] ? s1[i] : 1) * 2;   /* 全 fp16 */
+    }
+    uint8_t *b = (uint8_t *)calloc(1, total);
+    if (!b) return 0;
+    put32(b + 0, (uint32_t)FENG_MAGIC);
+    put32(b + 4, 1u);
+    put32(b + 8, (uint32_t)NTEN);
+    put32(b + 12, NL); put32(b + 16, H); put32(b + 20, NH);
+    put32(b + 24, HD); put32(b + 28, FF); put32(b + 32, VOCAB);
+    putf32(b + 36, 1e-6f);
+    putf32(b + 40, 1e6f);
+    for (int i = 0; i < NTEN; i++) {
+        uint8_t *e = b + 44 + (size_t)i * 68;
+        memcpy(e, names[i], strlen(names[i]));
+        put32(e + 32, (uint32_t)FENG_DT_FP16);
+        put32(e + 36, s0[i]);
+        put32(e + 40, s1[i]);
+        put32(e + 44, 0);
+        put32(e + 48, 0);
+        const uint64_t nb = (uint64_t)s0[i] * (s1[i] ? s1[i] : 1) * 2;
+        put64(e + 52, off);
+        put64(e + 60, nb);
+        off += nb;
+    }
+    *out = b;
+    return total;
+}
+
 static int fuzz_model(int rounds)
 {
     int fails = 0;
-    static uint8_t blob[8192];
+    /* 随机字节：精确分配，别放在大数组里（红区碰不到就漏越界） */
     for (int i = 0; i < rounds; i++) {
-        const int len = rnd_range(0, (int)sizeof(blob));
+        const int len = rnd_range(0, 8192);
+        uint8_t *blob = (uint8_t *)malloc((size_t)(len > 0 ? len : 1));
+        if (!blob) { fprintf(stderr, "[FAIL] oom\n"); return fails + 1; }
         for (int j = 0; j < len; j++) blob[j] = (uint8_t)rnd32();
         feng_model_t m;
         memset(&m, 0, sizeof(m));
         const int rc = feng_model_init(&m, blob, (size_t)len);
+        free(blob);
         if (rc == 0) {
             /* 随机字节通过校验的概率应当极低；真过了说明校验有洞 */
             fprintf(stderr, "[FAIL] 随机 %d 字节被当成合法模型（seed 可复现）\n", len);
@@ -200,17 +281,51 @@ static int fuzz_model(int rounds)
     }
     /* 合法 magic 但字段自相矛盾的头部：必须被拒，且不能读越界 */
     for (int i = 0; i < 200; i++) {
-        memset(blob, 0, 64);
-        const uint32_t magic = (uint32_t)FENG_MAGIC;
-        memcpy(blob, &magic, 4);
-        const uint32_t ver = 1u;
-        memcpy(blob + 4, &ver, 4);
+        uint8_t blob[64];
+        memset(blob, 0, sizeof(blob));
+        put32(blob, (uint32_t)FENG_MAGIC);
+        put32(blob + 4, 1u);
         uint32_t bad[7] = {rnd32(), rnd32(), rnd32(), rnd32(), rnd32(), rnd32(), rnd32()};
         memcpy(blob + 8, bad, sizeof(bad));
+        putf32(blob + 36, 1e-6f);
+        putf32(blob + 40, 1e6f);
         feng_model_t m;
         memset(&m, 0, sizeof(m));
-        (void)feng_model_init(&m, blob, 64);
+        (void)feng_model_init(&m, blob, sizeof(blob));
     }
+    /* 结构化种子：合法镜像 + 随机变异（尺寸字段 / 目录项 / 截断）。
+     * 只有能穿过 header 的种子才会覆盖张量绑定与逐项尺寸校验。 */
+    uint8_t *seed = NULL;
+    const size_t seed_len = build_seed_model(&seed);
+    if (!seed || seed_len == 0) { fprintf(stderr, "[FAIL] 造种子模型失败\n"); return fails + 1; }
+    {   /* 种子本身必须能加载，否则深路径根本没被覆盖 */
+        feng_model_t m;
+        memset(&m, 0, sizeof(m));
+        if (feng_model_init(&m, seed, seed_len) != 0) {
+            fprintf(stderr, "[FAIL] 种子模型不合法（fuzz 未覆盖张量绑定）\n");
+            fails++;
+        }
+    }
+    const int structured = rounds < 1000 ? rounds : 1000;   /* 每次可能打印库内诊断，别刷屏 */
+    for (int i = 0; i < structured; i++) {
+        const int cut = rnd_range(1, 5);
+        size_t len = seed_len;
+        if ((rnd32() & 7u) == 0u) len = (size_t)rnd_range(1, (int)seed_len);  /* 截断 */
+        uint8_t *blob = (uint8_t *)malloc(len > 0 ? len : 1);
+        if (!blob) { fprintf(stderr, "[FAIL] oom\n"); break; }
+        memcpy(blob, seed, len < seed_len ? len : seed_len);
+        for (int k = 0; k < cut; k++) {
+            /* 主要打头部/目录（前 1.6KB），偶尔打数据区 */
+            const size_t at = (rnd32() & 3u) ? (size_t)rnd_range(0, 44 + 26 * 68)
+                                             : (size_t)rnd_range(0, (int)len);
+            if (at < len) blob[at] ^= (uint8_t)(1u << (rnd32() & 7u));
+        }
+        feng_model_t m;
+        memset(&m, 0, sizeof(m));
+        (void)feng_model_init(&m, blob, len);
+        free(blob);
+    }
+    free(seed);
     return fails;
 }
 

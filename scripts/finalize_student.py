@@ -29,12 +29,35 @@ def main():
     ap.add_argument("--dest", default=str(STU / "final"))
     ap.add_argument("--quants", nargs="*", default=["Q8_0", "Q4_K_M"])
     args = ap.parse_args()
+    src, dest = Path(args.model).resolve(), Path(args.dest).resolve()
+    # 先做路径校验（不依赖 llama.cpp）：源不存在、或源/目的相同/互相包含时，
+    # 旧实现会先 rmtree(dest) 把源删掉再报错（A39）。
+    if not src.is_dir():
+        print(f"找不到源模型目录：{src}（v3 时代的 student/ 已删除，用 --model 指向现有权重）")
+        return 2
+    if src == dest or src in dest.parents or dest in src.parents:
+        print(f"拒绝：--model 与 --dest 不能相同或互相包含（{src} / {dest}）")
+        return 2
     require(CONVERT, "llama.cpp 的 convert_hf_to_gguf.py", "FENG_LLAMA_DIR")
     require(PY, "Python 解释器", "FENG_PY")
-    src, dest = Path(args.model), Path(args.dest)
+    # 复制到临时目录再换入：复制失败不会破坏已有的 dest。
+    staged = dest.with_name(dest.name + ".new")
+    if staged.exists():
+        shutil.rmtree(staged)
+    shutil.copytree(src, staged)
+    backup = dest.with_name(dest.name + ".bak")
+    if backup.exists():
+        shutil.rmtree(backup)
     if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest)
+        dest.rename(backup)
+    try:
+        staged.rename(dest)
+    except OSError:
+        if backup.exists() and not dest.exists():
+            backup.rename(dest)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
 
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained(dest)

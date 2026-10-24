@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -45,7 +46,35 @@ def main() -> int:
     man = json.loads(MANIFEST.read_text(encoding="utf-8"))
     arts = man.get("artifacts", [])
     print(f"清单版本 {man.get('version')}（发布时 commit {man.get('commit_at_release')}），"
-          f"{len(arts)} 个产物")
+          f"{len(arts) if isinstance(arts, list) else '?'} 个产物")
+
+    # schema 校验：空清单 / 缺字段 / 非 sha256 / 绝对路径 / 越界路径都算失败。
+    # 旧实现遍历空清单时 bad=missing=0，strict 仍然 return 0——发布校验可以静默失效（A48）。
+    problems = []
+    if not isinstance(arts, list) or not arts:
+        problems.append("artifacts 缺失或为空列表")
+        arts = []
+    for i, a in enumerate(arts):
+        if not isinstance(a, dict):
+            problems.append(f"artifacts[{i}] 不是对象")
+            continue
+        for key in ("path", "role", "sha256"):
+            if not isinstance(a.get(key), str) or not a.get(key):
+                problems.append(f"artifacts[{i}] 缺字段 {key}")
+        p = a.get("path")
+        if isinstance(p, str) and p:
+            pp = Path(p)
+            if pp.is_absolute() or ".." in pp.parts:
+                problems.append(f"artifacts[{i}] path 不是仓库内相对路径：{p}")
+        s = a.get("sha256")
+        if isinstance(s, str) and s and not re.fullmatch(r"[0-9a-fA-F]{64}", s):
+            problems.append(f"artifacts[{i}] sha256 不是 64 位十六进制")
+    if problems:
+        print("清单结构异常：")
+        for p in problems:
+            print("  [结构] " + p)
+        print("清单不可信，按失败处理。")
+        return 1
 
     ok = missing = bad = 0
     for a in arts:

@@ -59,9 +59,17 @@ def run_expect(name, cmd, needles, env=None):
     return ok
 
 
+# 多轮套件的默认下限（raw model，不含引擎记忆 tool）：
+#   4.0-embed（2026-10-25 实测，PC q2b8）：mt 7/10、mem 8/12、seq 9/10。
+#   v3.19-embed 时代是 8/10、12/12、10/10；4.0-embed 的「记忆 24/24」是板端
+#   记忆 tool 的确定性回答口径，不是这里的 raw-model 12 题。
+# **换发布权重时要显式改这里或传 --mt-min**，别静默沿用旧下限。
+MT_MIN = [7, 10, 8, 12, 9, 10]
+
+
 def run_mt(name, cmd):
     """多轮套件有已知的容量边界（seq 8/10、mt 7/10），不能因为“能跑”就 PASS。
-    这里解析三项分数并对照当前基线；任何一项低于基线就 FAIL。"""
+    这里解析三项分数并对照下限；任何一项低于下限就 FAIL。退出码必须为 0。"""
     print(f"\n=== {name} ===", flush=True)
     r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
@@ -76,30 +84,43 @@ def run_mt(name, cmd):
     mt = score(r"SUMMARY mt-suite (\d+)/(\d+)", out)
     mem = score(r"SUMMARY mem12 (\d+)/(\d+)", out)
     seq = score(r"SUMMARY seq (\d+)/(\d+)", out)
-    # 当前基线（v3.19-embed，保留跨轮 nhist 后实测）：mt 8/10、mem 12/12、seq 10/10。
     # 用 >= 而不是 ==，避免模型改进后反而 FAIL。
-    ok = (mt[0] is not None and mt[0] >= 8 and mt[1] == 10 and
-          mem[0] == 12 and mem[1] == 12 and
-          seq[0] == 10 and seq[1] == 10)
-    print(f"--- {name}: {'PASS' if ok else 'FAIL'} (mt={mt[0]}/{mt[1]}, "
-          f"mem={mem[0]}/{mem[1]}, seq={seq[0]}/{seq[1]})", flush=True)
+    # 退出码必须为 0：旧实现只看分数，套件打印完 SUMMARY 后崩溃仍算 PASS（A31）。
+    ok = (r.returncode == 0 and
+          mt[0] is not None and mt[0] >= MT_MIN[0] and mt[1] == MT_MIN[1] and
+          mem[0] >= MT_MIN[2] and mem[1] == MT_MIN[3] and
+          seq[0] >= MT_MIN[4] and seq[1] == MT_MIN[5])
+    print(f"--- {name}: {'PASS' if ok else 'FAIL'} (exit {r.returncode}, mt={mt[0]}/{mt[1]}, "
+          f"mem={mem[0]}/{mem[1]}, seq={seq[0]}/{seq[1]}；下限 "
+          f"{MT_MIN[0]}/{MT_MIN[1]}, {MT_MIN[2]}/{MT_MIN[3]}, {MT_MIN[4]}/{MT_MIN[5]})",
+          flush=True)
     return ok
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-export",
-        default=str(next((d for d in [ROOT / "board" / "model_export_v4",
+        default=str(next((d for d in [ROOT / "board" / "model_export_4.0-embed",
+                                        ROOT / "board" / "model_export_v4",
                                         ROOT / "board" / "model_export_v3_19b6"] if d.exists()),
-                          ROOT / "board" / "model_export_v3_19b6")))
+                          ROOT / "board" / "model_export_4.0-embed")))
     ap.add_argument("--skip-docs", action="store_true")
     ap.add_argument("--skip-build", action="store_true")
     ap.add_argument("--require-model", action="store_true",
                     help="模型导出缺失时判 FAIL（发布前验收用）")
+    ap.add_argument("--mt-min", default="",
+                    help="多轮套件下限，六个逗号分隔整数：mt_ok,mt_n,mem_ok,mem_n,seq_ok,seq_n"
+                         "（默认 = 4.0-embed 实测值）")
     ap.add_argument("--check-export", default="",
                     help="pc_check 用的导出目录（需含 ref_logits.bin）；缺省先用 --model-export，"
                          "没有参考 logits 时回退到 board/model_export_v319base_q4")
     args = ap.parse_args()
+
+    if args.mt_min:
+        vals = [int(x) for x in args.mt_min.split(",")]
+        if len(vals) != 6:
+            ap.error("--mt-min 需要 6 个整数")
+        MT_MIN[:] = vals
 
     results = []
     skipped = []
@@ -149,9 +170,25 @@ def main() -> int:
         if args.require_model:
             results.append(("model_present", False))
     else:
+        # 打印权重身份：同一台机器上可能同时躺着多个导出目录（4.0-embed / 4.0B /
+        # v3_19b6…），只看“全绿”无法判断测的是哪一份权重（A33）。
+        import hashlib
+        mb = exp / "model.bin"
+        h = hashlib.sha256()
+        with mb.open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        print(f"\n[模型] {exp}\n        model.bin {mb.stat().st_size} B  sha256 {h.hexdigest()}",
+              flush=True)
         mt = PC / "pc_mt_suite.exe"
         if mt.exists():
             results.append(("mt_suite", run_mt("多轮回归套件", [str(mt), str(exp)])))
+        else:
+            if args.require_model:
+                print(f"\n[缺失] {mt}（--require-model 要求必需套件存在）", flush=True)
+                results.append(("mt_suite_missing", False))
+            else:
+                skipped.append("mt_suite（二进制缺失）")
         suite = PC / "pc_kv_suite_q2b8.exe"
         prompt = ROOT / "pc" / "prompt_long.txt"
         if suite.exists() and prompt.exists():
@@ -163,7 +200,11 @@ def main() -> int:
                 "算术子集", [str(suite), str(exp), str(prompt), "5200"],
                 ["短任务 21/21"], env=env)))
         else:
-            skipped.append("kv_suite32/arith21（二进制或 prompt_long.txt 缺失）")
+            if args.require_model:
+                print(f"\n[缺失] {suite} 或 {prompt}", flush=True)
+                results.append(("kv_suite_missing", False))
+            else:
+                skipped.append("kv_suite32/arith21（二进制或 prompt_long.txt 缺失）")
         check = PC / "pc_check.exe"
         # 板端发布导出（model_export_v3_19b6）为省体积不带 ref_logits.bin；
         # pc_check 只验证引擎实现，不依赖具体权重，所以回退到带参考 logits 的导出目录。
@@ -179,7 +220,7 @@ def main() -> int:
                 [str(check), str(cexp), str(ROOT / "logs" / "c_logits_check_all.bin")],
                 ["MATCH"])))
         else:
-            skipped.append("pc_check（ref_logits.bin 缺失）")
+            skipped.append("pc_check（ref_logits.bin 或二进制缺失）")
             if args.require_model:
                 results.append(("pc_check_ref", False))
 

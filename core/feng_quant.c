@@ -225,9 +225,14 @@ FENG_HOT static void gemv_range_cpu(const void *tensor, uint32_t dtype, const fl
         }
 #endif
 #if defined(FENG_USE_OMP)
+    /* MSVC（OpenMP 2.0 / vcomp）不允许在 for 语句里声明循环变量（C3015），
+     * 所以变量提到外面声明；GCC/Clang 同样接受。 */
+    int o;
 #pragma omp parallel for schedule(static) if (r1 - r0 >= 128)
+    for (o = r0; o < r1; o++) {
+#else
+    for (int o = r0; o < r1; o++) {
 #endif
-        for (int o = r0; o < r1; o++) {
             const uint16_t *row = w + (size_t)o * n_in;
             float acc = 0.f;
             for (int i = 0; i < n_in; i++) {
@@ -348,9 +353,12 @@ FENG_HOT static void gemv_range_cpu(const void *tensor, uint32_t dtype, const fl
     return;
 #endif
 #if defined(FENG_USE_OMP)
+    int o;                          /* 见上面 fp16 分支：MSVC 的 OpenMP 2.0 限制 */
 #pragma omp parallel for schedule(static) if (r1 - r0 >= 128)
-#endif
+    for (o = r0; o < r1; o++) {
+#else
     for (int o = r0; o < r1; o++) {
+#endif
         const uint8_t *row = base + (size_t)o * row_bytes;
         const uint8_t *scales = row;
         const uint8_t *packed = row + (size_t)n_blocks * 2;

@@ -92,7 +92,7 @@ int main(int argc, char **argv)
     ws.k = (float *)xmalloc(sizeof(float) * h);
     ws.v = (float *)xmalloc(sizeof(float) * h);
     ws.attn = (float *)xmalloc(sizeof(float) * h);
-    ws.proj = (float *)xmalloc(sizeof(float) * ff);
+    ws.proj = (float *)xmalloc(sizeof(float) * h);   /* attn/down 投影都输出 hidden */
     ws.gate = (float *)xmalloc(sizeof(float) * ff);
     ws.up = (float *)xmalloc(sizeof(float) * ff);
     ws.ffn = (float *)xmalloc(sizeof(float) * ff);

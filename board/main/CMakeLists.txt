@@ -56,14 +56,26 @@ endif()
 idf_component_register(SRCS ${FENG_SRCS} INCLUDE_DIRS "." "${FENG_CORE_DIR}"
                        PRIV_REQUIRES nvs_flash esp_timer esp_partition esp_driver_uart)
 
-# 全组件严格 C23（v4.0 起，嵌入式侧从 C++23 迁到 C23）。
-# C_EXTENSIONS OFF = -std=c23 而不是 -std=gnu23，与 PC 侧口径一致。
+# 全组件 C23 语言级别（v4.0 起，嵌入式侧从 C++23 迁到 C23）。
+#
+# 用的是 **-std=gnu23** 而不是 -std=c23：IDF 自己的 xtensa 头文件
+# （xt_utils.h / xt_instr_macros.h）在函数体里用 GNU `asm`，严格 ISO 模式下
+# 直接报 "'asm' undeclared"（实测）；这是 IDF 的依赖，不是本仓库代码的扩展。
+# 本仓库自己的 core/*.c 仍然按严格 C23 书写（PC/手机侧就是 -std=c23 编的）。
+#
+# ⚠️ IDF 5.5 的 build.cmake 会在目录级追加 `-std=gnu17`，而目录级选项排在
+# target 选项**之前**；只在组件属性上设 C_STANDARD，命令行会变成
+# `-std=gnu23 ... -std=gnu17`，后一个生效（等于退回 C17）。这里把 `-std=gnu23`
+# 作为 target_compile_options 显式追加，保证它排在最后；main.c 里另有
+# `_Static_assert(__STDC_VERSION__ >= 202000L)` 兜底（构建期就报错；xtensa
+# gcc 14.2 对 gnu23 报草案值 202000L）。
 #
 # 注意：原来的 -fno-exceptions / -fno-rtti / -fno-threadsafe-statics 是 C++ 专属选项，
 # gcc 对 .c 文件会报 "valid for C++ but not for C"；而且它们同时会命中 .S 汇编文件。
 # 迁到 C 之后这些约束天然成立（C 没有异常/RTTI），直接删掉。
 set_target_properties(${COMPONENT_LIB} PROPERTIES
-    C_STANDARD 23 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    C_STANDARD 23 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
+target_compile_options(${COMPONENT_LIB} PRIVATE -std=gnu23)
 # the inference kernels are the hot path: -O2 + FPU on the XL7
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2)
 # 非热点模块用 -Os 压体积：它们不在每 token 的内层循环里（tool 秒回、

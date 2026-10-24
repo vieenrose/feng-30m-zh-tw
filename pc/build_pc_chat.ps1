@@ -39,14 +39,27 @@ try {
         "pc_rand_ask.cpp", "pc_time_ask.cpp"
     )
 
+    function Quote-Arg([string]$a) {
+        # Windows 命令行给 argv 的规则：参数里的引号要反斜杠转义；**结尾的反斜杠**
+        # 必须成对，否则会把结束引号吃掉。踩过的坑：`/FoE:\...\q2\` 原样加引号后
+        # 变成 `/FoE:\...\q2"`，cl 报 D8036「/Fo 不能用于多个源文件」，默认 MSVC
+        # 构建直接失败（只有手工 -MinGW 能过）。
+        if ($a.Length -gt 0 -and $a -notmatch '[\s"]') { return $a }
+        $s = [regex]::Replace($a, '(\\*)"', '$1$1\"')
+        $s = [regex]::Replace($s, '(\\+)$', '$1$1')
+        return '"' + $s + '"'
+    }
+
     function Invoke-Native([string]$exe, [string[]]$argv) {
         # 用 System.Diagnostics.Process 而不是 `& $exe | ForEach-Object`：
         # 后者在某些非控制台宿主（CI/代理沙箱里的 PowerShell）会对原生 exe 报
         # 「无法在管道中间运行文档」直接崩掉；Process.Start 是纯托管机制，
         # 任何宿主里行为一致，输出/退出码也照拿。
+        # 参数自己按 Windows 规则加引号：ArgumentList 在 Windows PowerShell 5.1
+        # （check_all 优先用的那个）里不存在。
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $exe
-        $psi.Arguments = (($argv | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+        $psi.Arguments = (($argv | ForEach-Object { Quote-Arg $_ }) -join ' ')
         $psi.WorkingDirectory = (Get-Location).Path   # 继承脚本的 Push-Location
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
@@ -87,8 +100,12 @@ try {
         # 核心走 C23：/TC 强制按 C 编译，/std:clatest 打开 C23（[[nodiscard]] 等要它）
         # FENG_FP16_WEIGHTS 必须同时给核心与驱动：它改变 feng_layer_t 的大小，
         # 两边不一致就是 ABI 错位（结构体越界读写）。
+        # FENG_USE_OMP 也必须同时给核心：GEMV 的 `#pragma omp parallel for` 在
+        # feng_quant.c（用 $cFlags 单独编译的那趟）里——只给驱动开 OpenMP
+        # 等于什么都没并行（A52）。
         $cFlags = @("/nologo", "/c", "/O2", "/std:clatest", "/TC", "/utf-8", "/wd4996",
-                    "/I..\core", "/DFENG_FP16_WEIGHTS=1", "/DFENG_MAX_SCORES=32768")
+                    "/I..\core", "/DFENG_FP16_WEIGHTS=1", "/DFENG_MAX_SCORES=32768",
+                    "/DFENG_USE_OMP=1", "/openmp")
         # 驱动走 C++23：/TP 强制按 C++ 编译；异常/RTTI 对纯 C 核心无意义，
         # 但 PC 驱动自己也遵守"零异常"约定，所以保留关闭开关
         $cxxFlags = @("/nologo", "/c", "/O2", "/std:c++latest", "/TP", "/utf-8",
@@ -154,7 +171,7 @@ try {
         $gcc = $env:FENG_GCC; if (-not $gcc) { $gcc = "gcc" }
         $gxx = $env:FENG_GXX; if (-not $gxx) { $gxx = "g++" }
         $cFlags = @("-std=c23", "-O2", "-I..\core", "-DFENG_FP16_WEIGHTS=1",
-                    "-DFENG_MAX_SCORES=32768")
+                    "-DFENG_MAX_SCORES=32768", "-DFENG_USE_OMP=1", "-fopenmp")
         $cxxFlags = @("-std=c++23", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics",
                        "-DFENG_FP16_WEIGHTS=1", "-DFENG_MAX_SCORES=32768",
                       "-O2", "-DFENG_USE_OMP=1", "-fopenmp", "-I..\core")

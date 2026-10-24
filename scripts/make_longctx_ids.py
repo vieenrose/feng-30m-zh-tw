@@ -38,23 +38,58 @@ def body_text(tok, target_tokens: int) -> str:
     return unit * reps
 
 
+def rev_ids(tok, text: str) -> list[int]:
+    return tok(text, add_special_tokens=False)["input_ids"]
+
+
+def splice_window(tok, keep: int, inserts: list[str], rng) -> tuple[list[int], list[int]]:
+    """token 级拼接：先给 QUESTION 留位置，再把埋点插进最终窗口内。
+
+    旧实现先造 `keep+256` token 的正文、插完事实再 `[-keep:]`——靠前的事实会被
+    头部裁掉，样本变成不可回答（A55）。这里保证长度精确 = keep，并断言每条埋点
+    都出现在最终解码文本里。
+    """
+    tail = rev_ids(tok, QUESTION)
+    budget = keep - len(tail)
+    parts = [rev_ids(tok, s) for s in inserts]
+    body_budget = budget - sum(len(p) for p in parts)
+    if body_budget < 256:
+        raise RuntimeError(f"ctx={keep} 太小，放不下正文 + {len(inserts)} 条埋点")
+    body = rev_ids(tok, body_text(tok, body_budget))[:body_budget]
+    pos = sorted(rng.randrange(int(0.1 * body_budget), int(0.9 * body_budget))
+                 for _ in inserts)
+    out, at, prev = [], [], 0
+    for p, part in zip(pos, parts):
+        p = max(prev, min(p, body_budget))
+        out.extend(body[prev:p])
+        at.append(len(out))
+        out.extend(part)
+        prev = p
+    out.extend(body[prev:])
+    out.extend(tail)
+    if len(out) != keep:
+        raise RuntimeError(f"窗口长度不符：{len(out)} != {keep}")
+    text = tok.decode(out)
+    for s in inserts:
+        if s not in text:
+            raise RuntimeError(f"埋点不在最终输入里：{s!r}")
+    return out, at
+
+
 def build(tok, ctx: int, seed: int, negative: bool) -> dict:
     rng = random.Random(seed)
     keep = max(1, ctx - GEN_RESERVE)
-    text = body_text(tok, keep + 256)
     code = None
+    inserts = []
     if negative:
         for _ in range(rng.randint(1, 3)):
-            fact = rng.choice(DECOYS).format(c=f"{rng.randint(10000, 99999)}")
-            p = rng.randrange(0, max(1, len(text)))
-            text = text[:p] + fact + text[p:]
+            inserts.append(rng.choice(DECOYS).format(c=f"{rng.randint(10000, 99999)}"))
     else:
         code = f"{rng.randint(10000, 99999)}"
-        fact = f"（重要信息：保险柜密码是 {code}。）"
-        p = rng.randrange(int(0.1 * len(text)), int(0.9 * len(text)))
-        text = text[:p] + fact + text[p:]
-    ids = tok(text + QUESTION, add_special_tokens=False)["input_ids"][-keep:]
-    return {"code": code, "ids": ids, "negative": negative}
+        inserts.append(f"（重要信息：保险柜密码是 {code}。）")
+    ids, at = splice_window(tok, keep, inserts, rng)
+    return {"code": code, "ids": ids, "negative": negative,
+            "needle_frac": -1.0 if negative else round(at[0] / len(ids), 3)}
 
 
 def main() -> None:

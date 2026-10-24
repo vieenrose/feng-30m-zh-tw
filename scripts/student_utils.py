@@ -4,13 +4,15 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 
-def chunked_lm_loss(model, input_ids, labels, chunk=512):
+def chunked_lm_loss(model, input_ids, labels, chunk=512, head_weight=None):
     """Cross-entropy without materialising [batch, seq, vocab] logits.
 
     The lm_head+CE is checkpointed per chunk, so peak memory stays ~chunk*vocab.
+    head_weight: 显式指定输出投影权重（W-QAT 用：传入按导出格式量化过的
+    lm_head，否则损失会绕过量化 forward 直接读原始 fp32 权重）。
     """
     hidden = model.model(input_ids=input_ids, use_cache=False).last_hidden_state
-    weight = model.lm_head.weight
+    weight = model.lm_head.weight if head_weight is None else head_weight
     V = weight.shape[0]
     total_sup = (labels != -100).sum().clamp(min=1)
     S = input_ids.shape[1]

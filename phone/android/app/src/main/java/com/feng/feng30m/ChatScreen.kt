@@ -69,8 +69,8 @@ fun ChatScreen(
             TopAppBar(
                 title = { Text("feng-30m") },
                 actions = {
-                    TextButton(onClick = onMemory, enabled = ready) { Text("记忆") }
-                    TextButton(onClick = onReset, enabled = ready) { Text("清空") }
+                    TextButton(onClick = onMemory, enabled = ready && !busy) { Text("记忆") }
+                    TextButton(onClick = onReset, enabled = ready && !busy) { Text("清空") }
                 }
             )
         },
