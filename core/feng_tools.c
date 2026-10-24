@@ -33,13 +33,33 @@ static const char *k_week[] = {"日", "一", "二", "三", "四", "五", "六"};
 
 static int contains(const char *s, const char *kw);
 
+/* 支持 0001-01-01 .. 9999-12-31；超出就夹到边界。
+ * 旧实现直接 epoch + 28800，LLONG_MAX 附近是有符号溢出（UBSAN 实测）。 */
+#define EPOCH_MIN (-62135596800LL)
+/* 9999-12-31 23:59:59 UTC 再减 8 小时，保证 +8 后仍落在 9999 年内。 */
+#define EPOCH_MAX (253402300799LL - 8 * 3600)
+
+static long long clamp_epoch(long long t)
+{
+    if (t < EPOCH_MIN) return EPOCH_MIN;
+    if (t > EPOCH_MAX) return EPOCH_MAX;
+    return t;
+}
+
+/* 向下取整除法（C 的 / 向零截断，负时间戳会算错一天）。 */
+static long long floor_div(long long a, long long b)
+{
+    long long q = a / b;
+    if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
+    return q;
+}
+
 void feng_time_format_utc8(long long epoch, char *buf, int buf_sz)
 {
     if (buf == NULL || buf_sz <= 0) return;
-    long long t = epoch + 8 * 3600;                  /* UTC+8 */
-    long long days = t / 86400;
-    long long rem = t % 86400;
-    if (rem < 0) { rem += 86400; days -= 1; }
+    long long t = clamp_epoch(epoch) + 8 * 3600;     /* UTC+8 */
+    long long days = floor_div(t, 86400);
+    long long rem = t - days * 86400;
     int y, m, d;
     civil_from_days(days, &y, &m, &d);
     const int hh = (int)(rem / 3600), mm = (int)((rem % 3600) / 60), ss = (int)(rem % 60);
@@ -51,8 +71,8 @@ void feng_time_format_utc8(long long epoch, char *buf, int buf_sz)
 void feng_time_format_date_utc8(long long epoch, char *buf, int buf_sz)
 {
     if (buf == NULL || buf_sz <= 0) return;
-    long long t = epoch + 8 * 3600;
-    long long days = t / 86400;
+    long long t = clamp_epoch(epoch) + 8 * 3600;
+    long long days = floor_div(t, 86400);
     int y, m, d;
     civil_from_days(days, &y, &m, &d);
     const int wd = (int)((days % 7 + 11) % 7);
@@ -100,7 +120,16 @@ static int time_math_answer(const char *user, char *answer, int answer_sz)
     if (!rel) return 0;
     const char *tail = rel + 6;                    /* "小时" 的 UTF-8 长度 */
     if (strncmp(tail, "候", 3) == 0) return 0;     /* "小时候" 不是时钟推算 */
-    const int sign = (strncmp(tail, "前", 3) == 0) ? -1 : 1;
+    /* 必须有“推算/问时”的意图，不能见到“8小时”就当成时钟题：
+     * 实测「我每天工作8小时」会被答成「再过8小时是…点」。 */
+    const int asks_time = strstr(user, "几点") || strstr(user, "什么时候") ||
+                          strstr(user, "时间");
+    const int has_after = strncmp(tail, "后", 3) == 0 ||
+                          strncmp(tail, "之后", 6) == 0 || strncmp(tail, "以后", 6) == 0;
+    const int has_before = strncmp(tail, "前", 3) == 0 ||
+                           strncmp(tail, "之前", 6) == 0 || strncmp(tail, "以前", 6) == 0;
+    if (!asks_time && !has_after && !has_before) return 0;
+    const int sign = has_before ? -1 : 1;
     /* "小时"前面紧邻的数字串（支持"再多3小时"/"3 小时"）。手写解析并饱和到
      * ±1,000,000：atoi 溢出是 UB，超大 delta 还会让下面的逐日循环跑几千万次。 */
     const char *p = rel;
@@ -122,14 +151,20 @@ static int time_math_answer(const char *user, char *answer, int answer_sz)
         int guard = 0;
         while (*q && (q[0] < '0' || q[0] > '9') && guard++ < 12) q++;
         if (q[0] >= '0' && q[0] <= '9') {
-            const int h = atoi(q);
+            /* 手写有界解析：atoi 对超长数字串是 UB，且这里只接受 0..23。 */
+            int h = 0, digits = 0;
+            while (q[0] >= '0' && q[0] <= '9' && digits < 4) {
+                h = h * 10 + (q[0] - '0');
+                q++;
+                digits++;
+            }
             if (h >= 0 && h <= 23) base_hour = h;
         }
     }
     if (base_hour < 0) {
         const long long now = s_epoch_fn ? s_epoch_fn() : 0;
         if (now <= 0) return 0;
-        base_hour = (int)(((now + 8 * 3600) / 3600) % 24);
+        base_hour = (int)(((clamp_epoch(now) + 8 * 3600) / 3600) % 24);
     }
     int total = base_hour + delta;
     int day = total / 24;

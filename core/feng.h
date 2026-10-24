@@ -36,8 +36,8 @@ extern "C" {
 #ifndef FENG_KV_Q2_BLOCK
 #define FENG_KV_Q2_BLOCK 16      /* 每多少个值共享一个 fp16 scale（须整除 head_dim、是 4 的倍数） */
 #endif
-#if FENG_KV_Q2 && ((FENG_KV_Q2_BLOCK) % 4 != 0)
-#error "FENG_KV_Q2_BLOCK 必须是 4 的倍数"
+#if FENG_KV_Q2 && ((FENG_KV_Q2_BLOCK) <= 0 || (FENG_KV_Q2_BLOCK) % 4 != 0)
+#error "FENG_KV_Q2_BLOCK 必须是正的 4 的倍数"
 #endif
 /* fp16 KV：每值 2 字节、无 scale。只在手机/PC 上有意义——板端 16 MB PSRAM 下
  * 2048 上下文要 40.4 MB，放不下（q2 只要 9.62 MB）。 */
@@ -91,48 +91,48 @@ extern "C" {
 /* 快速 exp（多项式 + 2^k 缩放，~20 条指令）替换 softmax / silu 里的 newlib expf
  * （实测 ~257 周期/次）。板端 softmax 从 169ms 降到 48ms（2048 ctx），
  * logits 差 ≤3.8e-6、32 题矩阵输出逐字相同；-DFENG_FAST_EXP=0 可切回 newlib。 */
-/* 块稀疏注意力（推理期，无需重训）：把长上下文的 O(n²) 注意力压到 O(n·k)。
- * 做法是每块 64 token，用块内最后一个 token 当代表算粗分，永远保留前 SINK 块
- * （attention sink）与最近 RECENT 块，其余按粗分取 top-K 块，只在这些块上算
- * 完整分数/softmax/V。
- *
- * **默认关闭**：它会跳过一部分上下文，长文召回可能掉分。开启后必须重跑
- * 128 题长文套件与「文中没有」拒答套件，掉了就退回。
- * 8k 上下文时注意力占 prefill 的 76%，这是唯一能真正压掉它的手段
- * （批量 GEMM 已被实测证伪）。 */
-#ifndef FENG_SPARSE_ATTN
-#define FENG_SPARSE_ATTN 0
-#endif
-#if FENG_SPARSE_ATTN
-#ifndef FENG_SPARSE_BLOCK
-#define FENG_SPARSE_BLOCK 64        /* 块大小（token） */
-#endif
-#ifndef FENG_SPARSE_TOP_K
-#define FENG_SPARSE_TOP_K 24        /* 除 sink/最近窗口外，最多再看多少块 */
-#endif
-#ifndef FENG_SPARSE_SINK
-#define FENG_SPARSE_SINK 2          /* 开头固定保留的块数（attention sink） */
-#endif
-#ifndef FENG_SPARSE_RECENT
-#define FENG_SPARSE_RECENT 2        /* 结尾固定保留的块数（最近上下文） */
-#endif
-/* 上限实验（只用于评估，不用于产品）：先用全量注意力算出真实分数，
- * 再按"块内最大真实分数"选 top-K 块，只保留这些块的贡献。
- * 它回答的是：**如果索引器完美，稀疏注意力还能保住多少分**。
- * 若 oracle 也掉分，说明这个预算下的稀疏化本身不成立，训练 indexer 也没用。 */
-/* 索引跨层复用（对应 V4.1-Flash 的 Reuse 模式）：只在第 0 层选一次块，
- * 后面 10 层沿用同一份块掩码。作用是让"选块"的成本从 11 次摊成 1 次；
- * 代价是后面各层看不到自己被漏掉的块。这里只用来量准确率影响。 */
-#ifndef FENG_SPARSE_REUSE
-#define FENG_SPARSE_REUSE 0
-#endif
-#ifndef FENG_SPARSE_ORACLE
-#define FENG_SPARSE_ORACLE 0
-#endif
-#ifndef FENG_SPARSE_MIN_TOKENS
-#define FENG_SPARSE_MIN_TOKENS 1024 /* 短于这个长度不启用（省不了多少还多一次扫描） */
-#endif
-#endif
+/* 块稀疏注意力（推理期，无需重训）：把长上下文的 O(n²) 注意力压到 O(n·k)。
+ * 做法是每块 64 token，用块内最后一个 token 当代表算粗分，永远保留前 SINK 块
+ * （attention sink）与最近 RECENT 块，其余按粗分取 top-K 块，只在这些块上算
+ * 完整分数/softmax/V。
+ *
+ * **默认关闭**：它会跳过一部分上下文，长文召回可能掉分。开启后必须重跑
+ * 128 题长文套件与「文中没有」拒答套件，掉了就退回。
+ * 8k 上下文时注意力占 prefill 的 76%，这是唯一能真正压掉它的手段
+ * （批量 GEMM 已被实测证伪）。 */
+#ifndef FENG_SPARSE_ATTN
+#define FENG_SPARSE_ATTN 0
+#endif
+#if FENG_SPARSE_ATTN
+#ifndef FENG_SPARSE_BLOCK
+#define FENG_SPARSE_BLOCK 64        /* 块大小（token） */
+#endif
+#ifndef FENG_SPARSE_TOP_K
+#define FENG_SPARSE_TOP_K 24        /* 除 sink/最近窗口外，最多再看多少块 */
+#endif
+#ifndef FENG_SPARSE_SINK
+#define FENG_SPARSE_SINK 2          /* 开头固定保留的块数（attention sink） */
+#endif
+#ifndef FENG_SPARSE_RECENT
+#define FENG_SPARSE_RECENT 2        /* 结尾固定保留的块数（最近上下文） */
+#endif
+/* 上限实验（只用于评估，不用于产品）：先用全量注意力算出真实分数，
+ * 再按"块内最大真实分数"选 top-K 块，只保留这些块的贡献。
+ * 它回答的是：**如果索引器完美，稀疏注意力还能保住多少分**。
+ * 若 oracle 也掉分，说明这个预算下的稀疏化本身不成立，训练 indexer 也没用。 */
+/* 索引跨层复用（对应 V4.1-Flash 的 Reuse 模式）：只在第 0 层选一次块，
+ * 后面 10 层沿用同一份块掩码。作用是让"选块"的成本从 11 次摊成 1 次；
+ * 代价是后面各层看不到自己被漏掉的块。这里只用来量准确率影响。 */
+#ifndef FENG_SPARSE_REUSE
+#define FENG_SPARSE_REUSE 0
+#endif
+#ifndef FENG_SPARSE_ORACLE
+#define FENG_SPARSE_ORACLE 0
+#endif
+#ifndef FENG_SPARSE_MIN_TOKENS
+#define FENG_SPARSE_MIN_TOKENS 1024 /* 短于这个长度不启用（省不了多少还多一次扫描） */
+#endif
+#endif
 #ifndef FENG_FAST_EXP
 #define FENG_FAST_EXP 1
 #endif
@@ -291,7 +291,10 @@ typedef struct {
     int max_ctx;
 } feng_workspace_t;
 
+/* 总量（K+V 数据 + 两份 scale），只用于显示/预算。 */
 size_t feng_kv_bytes(const feng_model_t *m, int ctx);
+/* 单个 cache 的数据字节数（不含 scale）——分配 k_cache/v_cache 必须用这个。 */
+size_t feng_kv_data_bytes(const feng_model_t *m, int ctx);
 /* fp16 scale slots for ONE cache (K or V) in the current KV mode; 0 for fp32 */
 size_t feng_kv_scale_slots(const feng_model_t *m, int ctx);
 size_t feng_ws_bytes(const feng_model_t *m, int ctx);

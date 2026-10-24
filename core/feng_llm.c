@@ -114,9 +114,13 @@ static void q2_lut_init(void)
     g_q2_lut_ready = 1;
 }
 #endif
-/* RoPE inverse frequencies, computed once (powf per token per head is expensive) */
+/* RoPE inverse frequencies, computed once per (head_dim, theta).
+ * 旧实现只用一个 bool：同进程换模型（不同 head_dim/theta）会沿用旧频率，
+ * 新 head_dim 多出来的项也永远是 0。缓存必须带参数键。 */
 static float g_rope_inv[128];
 static int g_rope_ready;
+static int g_rope_key_dim;
+static float g_rope_key_theta;
 
 static void rmsnorm(float *out, const float *x, const void *w_fp16, int n, float eps)
 {
@@ -145,10 +149,13 @@ static void rmsnorm(float *out, const float *x, const void *w_fp16, int n, float
 static void rope(float *vec, int n_heads, int head_dim, int pos, float theta)
 {
     const int half = head_dim / 2;
-    if (!g_rope_ready) {
-        for (int i = 0; i < half && i < (int)(sizeof(g_rope_inv) / sizeof(g_rope_inv[0])); i++) {
+    if (!g_rope_ready || g_rope_key_dim != head_dim || g_rope_key_theta != theta) {
+        const int cap = (int)(sizeof(g_rope_inv) / sizeof(g_rope_inv[0]));
+        for (int i = 0; i < half && i < cap; i++) {
             g_rope_inv[i] = powf(theta, -2.0f * (float)i / (float)head_dim);
         }
+        g_rope_key_dim = head_dim;
+        g_rope_key_theta = theta;
         g_rope_ready = 1;
     }
     for (int h = 0; h < n_heads; h++) {
@@ -197,24 +204,27 @@ static void silu_mul(float *out, const float *g, const float *u, int n)
     }
 }
 
-size_t feng_kv_bytes(const feng_model_t *m, int ctx)
+/* 单个 cache（K 或 V）的数据字节数，**不含 scale**。
+ * 前端必须按它分配 k_cache/v_cache：旧代码拿 feng_kv_bytes()（data+scale）
+ * 的一半当数据缓冲，又另外分配 scale，手机 q2/block8 多占 50%（154→231 MiB）。 */
+size_t feng_kv_data_bytes(const feng_model_t *m, int ctx)
 {
 #if FENG_KV_INT8
-    const size_t data = (size_t)m->hdr.n_layers * ctx * m->hdr.hidden * 2;
-    const size_t scal = (size_t)m->hdr.n_layers * ctx * m->hdr.n_heads * 2 * 2;
-    return data + scal;
+    return (size_t)m->hdr.n_layers * ctx * m->hdr.hidden;
 #elif FENG_KV_Q2
-    /* 2-bit 值：每 (层,位置) 的 K/V 各占 hidden/4 字节；
-     * scale 按 FENG_KV_Q2_BLOCK 个值一块存 fp16 */
-    const size_t data = (size_t)m->hdr.n_layers * ctx * (m->hdr.hidden / 4) * 2;
-    const size_t scal = (size_t)m->hdr.n_layers * ctx * (m->hdr.hidden / FENG_KV_Q2_BLOCK) * 2 * 2;
-    return data + scal;
+    return (size_t)m->hdr.n_layers * ctx * (m->hdr.hidden / 4);
 #elif FENG_KV_FP16
-    /* 每值 2 字节，无 scale；*2 是 K/V 两份 */
-    return (size_t)m->hdr.n_layers * ctx * m->hdr.hidden * 2 * sizeof(uint16_t);
+    return (size_t)m->hdr.n_layers * ctx * m->hdr.hidden * sizeof(uint16_t);
 #else
-    return (size_t)m->hdr.n_layers * ctx * m->hdr.hidden * 2 * sizeof(float);
+    return (size_t)m->hdr.n_layers * ctx * m->hdr.hidden * sizeof(float);
 #endif
+}
+
+size_t feng_kv_bytes(const feng_model_t *m, int ctx)
+{
+    /* K + V 两份数据，加两份 scale（fp32/fp16 的 scale 为 0）。 */
+    return feng_kv_data_bytes(m, ctx) * 2 +
+           feng_kv_scale_slots(m, ctx) * sizeof(uint16_t) * 2;
 }
 
 size_t feng_kv_scale_slots(const feng_model_t *m, int ctx)
@@ -569,7 +579,8 @@ static void q2_attn_range(void *arg, int part, int nparts)
 #if FENG_ATTN_PROF
         const unsigned pc0 = (unsigned)esp_cpu_get_cycle_count();
 #endif
-#if FENG_PHONE_NEON && FENG_PHONE_NEON_ATTN && FENG_Q2_LUT
+#if FENG_PHONE_NEON && FENG_PHONE_NEON_ATTN && FENG_Q2_LUT && \
+    (FENG_KV_Q2_BLOCK == 8)
         /* 手机端（需显式 -DFENG_PHONE_NEON_ATTN=1）：一条 NEON 内核算完整个 t 区间（每 (t,blk) 两条 4 路 FMA 链 +
          * 水平归约）。累加分组与标量链不同，结果在 fp32 噪声级（~1e-7 相对）；
          * 并行来自上层按 head 切分，所以这里不再嵌套线程。 */
@@ -693,9 +704,10 @@ static void q2_attn_range(void *arg, int part, int nparts)
             const uint8_t *vrow = (const uint8_t *)c->kv->v_cache
                                   + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->qb;
             const uint16_t *vsrow = c->kv->v_scale + ((size_t)c->l * c->nh + hh) * c->kv->ctx * c->nb;
-#if FENG_PHONE_NEON && FENG_Q2_LUT
-            /* 手机端：8 维一块，乘法分组 (st*lu)*sv 与标量版逐字相同、每个 d 按 t
-             * 递增 —— 与标量路径逐位一致。 */
+#if FENG_PHONE_NEON && FENG_Q2_LUT && (FENG_KV_Q2_BLOCK == 8)
+            /* 手机端：8 维一块，乘法分组 (st*sv)*lu 与标量版逐字相同、每个 d 按 t
+             * 递增 —— 与标量路径逐位一致。内核硬编码 block8：其它 block 必须
+             * 回退标量，否则 block16 只算一半维度、block4 会写出 head_dim。 */
             for (int blk = 0; blk < c->nb; blk++)
                 feng_neon_q2_attn_v(vrow, vsrow, scores, vacc, c->pos + 1,
                                     c->qb, c->nb, blk,

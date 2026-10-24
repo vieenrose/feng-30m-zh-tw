@@ -372,7 +372,26 @@ int feng_calc_extract(const char *user, char *expr, int expr_sz)
         char *q = p ? NULL : strstr(tmp, "*立方");
         if (p || q) {
             char *hit = p ? p : q;
+            const char *tail = hit + (p ? 7 : 7);   /* "*平方"/"*立方" 都是 7 字节 */
+            /* 后缀必须落在整式末尾，且底数是简单表达式（括号内可以有运算符）。
+             * 旧实现把命中点之后全部丢掉："2的平方加1" 答成 4；
+             * "1+3的平方" 又被展开成 1+3*1+3。两种都是静默错答，
+             * 这里不支持就直接返回 0，交给模型而不是猜。 */
+            while (is_space(*tail)) tail++;
+            if (*tail) return 0;
             *hit = 0;
+            int depth = 0, simple = 1, digits = 0;
+            for (const char *r = tmp; *r; r++) {
+                if (*r == '(') depth++;
+                else if (*r == ')') { if (--depth < 0) { simple = 0; break; } }
+                else if (is_digit(*r)) digits++;
+                else if (*r == '.' || is_space(*r)) continue;
+                else if (depth > 0 && (*r == '+' || *r == '-' || *r == '*' || *r == '/')) continue;
+                else if (*r == '-' && r == tmp) continue;          /* 一元负号 */
+                else if (*r == 'V' || *r == 'v') continue;
+                else { simple = 0; break; }
+            }
+            if (!simple || depth != 0 || digits == 0) return 0;
             const int len = (int)strlen(tmp);
             const int need = (p ? len * 2 + 2 : len * 3 + 3);
             const int room = (int)sizeof(work) - (int)(s - work);
@@ -586,6 +605,9 @@ static int feng_calc_seq_answer(const char *user, char *answer, int answer_sz)
     int nf = 0;
     int too_big = 0;
     for (const char *p = work; *p && nf < 8; ) {
+        /* 支持负号："从-2数到2" 旧实现把 -2 读成 2，输出 "2。"。 */
+        int neg = 0;
+        if (*p == '-' && is_digit(p[1])) { neg = 1; p++; }
         if (is_digit(*p)) {
             long long v = 0;
             while (is_digit(*p)) {
@@ -593,7 +615,7 @@ static int feng_calc_seq_answer(const char *user, char *answer, int answer_sz)
                 else v = v * 10 + (*p - '0');
                 p++;
             }
-            found[nf++] = (int)v;
+            found[nf++] = (int)(neg ? -v : v);
         } else {
             p++;
         }

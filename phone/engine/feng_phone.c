@@ -55,6 +55,7 @@
 /* ------------------------------------------------------------------ */
 
 static int s_nthreads = 1;      /* 总线程数，含调用者 */
+static int s_threads_explicit;  /* 用户显式设置过（--threads / JNI 参数） */
 /* NEON 内核（Q4 的 sdot 路径）**默认关闭**。
  *
  * 它不是逐位一致的：激活在进入内核前被量化成 int8（a8），误差会逐层累积。
@@ -102,6 +103,7 @@ int feng_phone_set_threads(int n)
     if (n < 1) n = 1;
     if (n > FENG_PHONE_MAX_THREADS) n = FENG_PHONE_MAX_THREADS;
     s_nthreads = n;
+    s_threads_explicit = 1;
     return n;
 }
 
@@ -216,11 +218,13 @@ int feng_phone_init(void)
         const int v = atoi(e);
         if (v >= 1) want = v;
     }
-    if (want == 0) {
+    /* 显式 --threads / JNI 参数优先：旧实现每次 init 都按环境变量/默认值
+     * 重设，CLI 传 1 线程、JNI 传 2 都会被悄悄改成 4。 */
+    if (want == 0 && !s_threads_explicit) {
         const int c = feng_phone_cpus();
         want = c > 4 ? 4 : c;
     }
-    feng_phone_set_threads(want);
+    if (want > 0) feng_phone_set_threads(want);
 
     const char *ne = getenv("FENG_PHONE_NEON");
     if (ne && *ne) feng_phone_set_neon(atoi(ne) != 0);
@@ -242,7 +246,10 @@ void feng_phone_parallel_for(int n, void (*fn)(void *, int), void *ctx)
     /* 任务太少 / 单线程 / 池没起来 -> 串行（与并行同序，结果逐位一致） */
     int nw = __atomic_load_n(&s_pool_nw, __ATOMIC_ACQUIRE);
     if (nw > s_nthreads - 1) nw = s_nthreads - 1;
-    if (nw <= 0 || n < 8) {
+    /* 只有“单片/没有 worker”才串行。旧的 n<8 门槛会把默认 4 片 attention
+     * 整段退化成调用者单线程执行（实测 4 片 unique_pthreads=1）。GEMV 的小
+     * 批任务自己按行数决定是否调用这里，不需要这层重复门槛。 */
+    if (nw <= 0 || n <= 1) {
         for (int i = 0; i < n; i++) fn(ctx, i);
         return;
     }
@@ -299,12 +306,19 @@ int feng_phone_load(const char *path, const uint8_t **blob, size_t *len)
     if (p == MAP_FAILED) p = NULL;
 #endif
     if (p != NULL) {
-        close(fd);
-        if (s_nmaps < FP_MAX_MAPS) {
-            s_maps[s_nmaps].base = p;
-            s_maps[s_nmaps].len = n;
-            s_nmaps++;
+        /* 表满时必须失败，不能返回一个未登记的 mmap：unload 查不到记录就会
+         * 对它调用 free()（非法释放）。 */
+        if (s_nmaps >= FP_MAX_MAPS) {
+#if !defined(FENG_PHONE_NO_MMAP)
+            munmap(p, n);
+#endif
+            close(fd);
+            return -4;
         }
+        close(fd);
+        s_maps[s_nmaps].base = p;
+        s_maps[s_nmaps].len = n;
+        s_nmaps++;
         *blob = (const uint8_t *)p;
         *len = n;
         return 0;

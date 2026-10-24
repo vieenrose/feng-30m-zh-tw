@@ -8,6 +8,7 @@
 #include "feng_memory.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,24 +16,50 @@
 #define KEY_CAP 24
 #define MAX_SLOTS 8
 
-static int u8len(const char *c);
+/* 返回 UTF-8 序列长度；源剩余字节不足、续字节非法或编码越界时返回 0。
+ * 旧实现只看首字节就假定有 2/3/4 字节，输入末尾恰好是 0xE4 这类首字节时
+ * 会读过 NUL（ASAN 实测 take_value 越界 3 字节）。 */
+static int u8seq(const char *p, size_t rem)
+{
+    if (p == NULL || rem == 0) return 0;
+    const unsigned char b = (unsigned char)p[0];
+    int need;
+    uint32_t cp;
+    if (b < 0x80) return 1;
+    if ((b & 0xE0) == 0xC0) { need = 1; cp = b & 0x1Fu; }
+    else if ((b & 0xF0) == 0xE0) { need = 2; cp = b & 0x0Fu; }
+    else if ((b & 0xF8) == 0xF0) { need = 3; cp = b & 0x07u; }
+    else return 0;
+    if (rem < (size_t)need + 1) return 0;
+    for (int i = 1; i <= need; i++) {
+        if (((unsigned char)p[i] & 0xC0) != 0x80) return 0;
+        cp = (cp << 6) | ((unsigned char)p[i] & 0x3Fu);
+    }
+    if (need == 1 && cp < 0x80) return 0;
+    if (need == 2 && cp < 0x800) return 0;
+    if (need == 3 && (cp < 0x10000 || cp > 0x10FFFF)) return 0;
+    if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+    return need + 1;
+}
+
 static void copy_utf8(char *dst, int cap, const char *src);
 
-/* 有界追加：n 是实际长度，绝不越过 cap-1。 */
-static void mem_append_fmt(char *out, int cap, int *n, const char *fmt, ...)
+/* 有界追加：n 是实际长度，绝不越过 cap-1；返回 0 表示发生截断。 */
+static int mem_append_fmt(char *out, int cap, int *n, const char *fmt, ...)
 {
-    if (out == NULL || n == NULL || cap <= 0) return;
+    if (out == NULL || n == NULL || cap <= 0) return 0;
     if (*n < 0) *n = 0;
-    if (*n >= cap - 1) { out[cap - 1] = 0; return; }
+    if (*n >= cap - 1) { out[cap - 1] = 0; return 0; }
     va_list ap;
     va_start(ap, fmt);
     const int room = cap - 1 - *n;
     const int w = vsnprintf(out + *n, (size_t)room, fmt, ap);
     va_end(ap);
-    if (w < 0) { out[*n] = 0; return; }
-    if (w >= room) *n = cap - 1;
-    else *n += w;
+    if (w < 0) { out[*n] = 0; return 0; }
+    if (w >= room) { *n = cap - 1; out[*n] = 0; return 0; }
+    *n += w;
     out[*n] = 0;
+    return 1;
 }
 
 typedef struct {
@@ -51,6 +78,12 @@ static int g_slot_next;
  * 避免模型凭对话上下文又把这条说出来（重新学习会解除墓碑）。 */
 static char g_forgot[MAX_SLOTS][KEY_CAP];
 static int g_nforgot;
+/* 记忆是否自上次落盘后发生过变化。前端不能靠“输入里有没有忘字”猜：
+ * “别记/删掉/不要记”同样会删事实，却一个“忘”字都没有。 */
+static int g_dirty;
+
+int feng_mem_dirty(void) { return g_dirty; }
+void feng_mem_mark_clean(void) { g_dirty = 0; }
 
 static void mark_forgot(const char *key)
 {
@@ -84,6 +117,7 @@ void feng_mem_clear(void)
     memset(g_slots, 0, sizeof(g_slots));
     g_slot_next = 0;
     g_nforgot = 0;
+    g_dirty = 1;
 }
 
 /* ---- 通用键值表 ---- */
@@ -190,24 +224,17 @@ static int mem_list(char *out, int cap)
 }
 
 /* ---- 文本工具 ---- */
-static int u8len(const char *c)
-{
-    const unsigned char b = (unsigned char)*c;
-    if (b < 0x80) return 1;
-    if ((b >> 5) == 0x6) return 2;
-    if ((b >> 4) == 0xE) return 3;
-    if ((b >> 3) == 0x1E) return 4;
-    return 1;
-}
-
-/* 按完整 UTF-8 字符截断，避免 snprintf 在字节边界把汉字劈成半个。 */
+/* 按完整 UTF-8 字符截断，避免 snprintf 在字节边界把汉字劈成半个。
+ * 非法/截断序列直接停止，绝不复制超出源字符串的部分。 */
 static void copy_utf8(char *dst, int cap, const char *src)
 {
     int n = 0;
-    if (cap <= 0) return;
-    while (src && src[n] && n < cap - 1) {
-        const int l = u8len(src + n);
-        if (n + l > cap - 1) break;
+    if (dst == NULL || cap <= 0) return;
+    if (src == NULL) { dst[0] = 0; return; }
+    const size_t total = strlen(src);
+    while (n < cap - 1) {
+        const int l = u8seq(src + n, total - (size_t)n);
+        if (l <= 0 || n + l > cap - 1) break;
         memcpy(dst + n, src + n, (size_t)l);
         n += l;
     }
@@ -258,11 +285,19 @@ static void trim_tail(char *out)
 /* 取一段值：到句读/换行或串尾；去尾部虚词；问句返回失败 */
 static int take_value(const char *p, char *out, int cap)
 {
-    while (*p == ' ' || *p == '\t' || starts_with(p, "：") || *p == ':') p++;
+    if (p == NULL || out == NULL || cap <= 0) return 0;
+    while (*p) {
+        if (*p == ' ' || *p == '\t' || *p == ':') { p++; continue; }
+        if (starts_with(p, "：")) { p += 3; continue; }   /* 全角冒号是 3 字节 */
+        break;
+    }
+    const char *start = p;
+    const size_t total = strlen(start);
     int n = 0;
     while (*p && n < cap - 1) {
         if (is_term(p)) break;
-        const int l = u8len(p);
+        const int l = u8seq(p, total - (size_t)(p - start));
+        if (l <= 0) { p++; continue; }                    /* 跳过非法字节，不越过 NUL */
         if (n + l >= cap) break;
         memcpy(out + n, p, (size_t)l);
         n += l;
@@ -278,13 +313,17 @@ static int take_value(const char *p, char *out, int cap)
 /* 取一段"键"：到 stop 串或句读为止，允许含"的"（调用方自行 trim） */
 static int take_key_to(const char *p, const char *stop, char *out, int cap)
 {
+    if (p == NULL || out == NULL || cap <= 0) return 0;
+    const char *start = p;
+    const size_t total = strlen(start);
     int n = 0;
     while (*p && n < cap - 1) {
         if (stop && starts_with(p, stop)) break;
         if (starts_with(p, "。") || starts_with(p, "？") || starts_with(p, "，") ||
-            starts_with(p, "！") || starts_with(p, "、") || starts_with(p, "？") ||
+            starts_with(p, "！") || starts_with(p, "、") ||
             *p == '?' || *p == '!' || *p == '\n' || *p == '\r' || *p == ',') break;
-        const int l = u8len(p);
+        const int l = u8seq(p, total - (size_t)(p - start));
+        if (l <= 0) { p++; continue; }
         if (n + l >= cap) break;
         memcpy(out + n, p, (size_t)l);
         n += l;
@@ -431,6 +470,7 @@ int feng_mem_learn(const char *user)
             changed = 1;
         }
     }
+    if (changed) g_dirty = 1;
     return changed;
 }
 
@@ -467,6 +507,13 @@ int feng_mem_answer(const char *user, char *answer, int answer_sz)
             if (r && (!f || r < f)) { f = r; flen = strlen(fv[i]); }
         }
         if (f) {
+            /* 否定保护：“不要忘掉/别忘/不能删”表达的是保留，不是删除。
+             * 旧实现只找“忘掉/删掉”子串，会把这类请求真的删掉。 */
+            static const char *keep[] = {"不要忘", "别忘", "不能忘", "不想忘",
+                                         "不要删", "别删", "不准忘", "不要忘记"};
+            for (unsigned i = 0; i < sizeof(keep) / sizeof(keep[0]); i++) {
+                if (strstr(user, keep[i]) != NULL) return 0;
+            }
             char key[KEY_CAP];
             take_key_to(f + flen, NULL, key, sizeof(key));
             norm_forget_key(key);
@@ -476,8 +523,11 @@ int feng_mem_answer(const char *user, char *answer, int answer_sz)
                 feng_mem_clear();
                 return answer_fmt(answer, answer_sz, "%s", "好，我把记住的这些都忘掉了。", "");
             }
-            if (mem_forget_key(key))
+            if (mem_forget_key(key)) {
+                g_dirty = 1;
                 return answer_fmt(answer, answer_sz, "好，我忘掉了你的%s。", key, "");
+            }
+            g_dirty = 1;                    /* 墓碑也要落盘，重启后才不会又答旧值 */
             return answer_fmt(answer, answer_sz, "我没有记过你的%s。", key, "");
         }
     }
@@ -587,33 +637,35 @@ static void export_val(char *dst, int cap, const char *src)
 int feng_mem_export(char *out, int cap)
 {
     if (out == NULL || cap <= 1) return -1;
-    int n = 0;
+    int n = 0, ok = 1;
     char v[VAL_CAP + 4];
     out[0] = 0;
     if (g_has_name) {
         export_val(v, sizeof(v), g_name);
-        mem_append_fmt(out, cap, &n, "name\t%s\n", v);
+        ok &= mem_append_fmt(out, cap, &n, "name\t%s\n", v);
     }
     if (g_has_city) {
         export_val(v, sizeof(v), g_city);
-        mem_append_fmt(out, cap, &n, "city\t%s\n", v);
+        ok &= mem_append_fmt(out, cap, &n, "city\t%s\n", v);
     }
     if (g_has_pet) {
         export_val(v, sizeof(v), g_pet);
-        mem_append_fmt(out, cap, &n, "pet\t%s\n", v);
+        ok &= mem_append_fmt(out, cap, &n, "pet\t%s\n", v);
     }
     for (int i = 0; i < MAX_SLOTS; i++) {
         if (!g_slots[i].used) continue;
         char k[KEY_CAP + 4];
         export_val(k, sizeof(k), g_slots[i].key);
         export_val(v, sizeof(v), g_slots[i].val);
-        mem_append_fmt(out, cap, &n, "slot\t%s\t%s\n", k, v);
+        ok &= mem_append_fmt(out, cap, &n, "slot\t%s\t%s\n", k, v);
     }
     for (int i = 0; i < g_nforgot; i++) {
         char k[KEY_CAP + 4];
         export_val(k, sizeof(k), g_forgot[i]);
-        mem_append_fmt(out, cap, &n, "forgot\t%s\n", k);
+        ok &= mem_append_fmt(out, cap, &n, "forgot\t%s\n", k);
     }
+    /* 头文件约定：缓冲不足返回 -1，调用方不能把半条记录当完整快照写盘。 */
+    if (!ok) { out[0] = 0; return -1; }
     return n;
 }
 
@@ -637,20 +689,20 @@ int feng_mem_import(const char *text)
             char *t2 = strchr(t1 + 1, '\t');
             if (t2 != NULL) *t2 = 0;
             if (strcmp(line, "name") == 0 && t1[1]) {
-                snprintf(g_name, VAL_CAP, "%s", t1 + 1);
-                g_has_name = 1;
+                copy_utf8(g_name, VAL_CAP, t1 + 1);
+                g_has_name = g_name[0] != 0;
                 clear_forgot("名字");
-                got = 1;
+                got |= g_has_name;
             } else if (strcmp(line, "city") == 0 && t1[1]) {
-                snprintf(g_city, VAL_CAP, "%s", t1 + 1);
-                g_has_city = 1;
+                copy_utf8(g_city, VAL_CAP, t1 + 1);
+                g_has_city = g_city[0] != 0;
                 clear_forgot("城市");
-                got = 1;
+                got |= g_has_city;
             } else if (strcmp(line, "pet") == 0 && t1[1]) {
-                snprintf(g_pet, VAL_CAP, "%s", t1 + 1);
-                g_has_pet = 1;
+                copy_utf8(g_pet, VAL_CAP, t1 + 1);
+                g_has_pet = g_pet[0] != 0;
                 clear_forgot("宠物");
-                got = 1;
+                got |= g_has_pet;
             } else if (strcmp(line, "slot") == 0 && t2 != NULL && t2[1]) {
                 slot_put(t1 + 1, t2 + 1);
                 got = 1;
@@ -661,5 +713,6 @@ int feng_mem_import(const char *text)
         }
         p = e ? e + 1 : p + len;
     }
+    if (got) g_dirty = 1;
     return got;
 }

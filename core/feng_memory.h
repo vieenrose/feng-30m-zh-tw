@@ -25,6 +25,10 @@ void feng_mem_snapshot(char *buf, int buf_sz);
  * 返回导出的字节数（0 = 没有可存内容，-1 = 缓冲不足）；导入返回 1 = 至少恢复一条。 */
 int feng_mem_export(char *out, int cap);
 int feng_mem_import(const char *text);
+/* 自上次落盘后记忆是否变化。前端按它决定保存，而不是猜输入里有没有“忘”字：
+ * “别记/删掉/不要记”同样删事实，却可能不含“忘”。导入后请调用 mark_clean。 */
+int feng_mem_dirty(void);
+void feng_mem_mark_clean(void);
 
 #ifdef __cplusplus
 }

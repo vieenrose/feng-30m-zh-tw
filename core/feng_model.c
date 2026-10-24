@@ -7,6 +7,7 @@
  * 仍然零分配、零全局构造。 */
 #include "feng.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -67,7 +68,17 @@ static const char *const kLayerTensorNames[11] = {
     if (m->hdr.n_heads == 0 || m->hdr.head_dim == 0 ||
         m->hdr.head_dim > FENG_MAX_HEAD_DIM) return -14;
     if ((uint64_t)m->hdr.n_heads * (uint64_t)m->hdr.head_dim != m->hdr.hidden) return -14;
-    if (m->hdr.ffn == 0 || m->hdr.vocab == 0 || m->hdr.vocab > 65535u) return -14;
+    /* RoPE 按前后两半配对，奇数 head_dim 会漏掉最后一个维度。 */
+    if ((m->hdr.head_dim & 1u) != 0u) return -14;
+#if FENG_KV_Q2
+    /* q2 的 scale 按 block 覆盖 head_dim：不整除就会漏量化尾部维度。 */
+    if ((uint64_t)m->hdr.head_dim % (uint64_t)FENG_KV_Q2_BLOCK != 0u) return -14;
+#endif
+    if (m->hdr.ffn == 0 || m->hdr.ffn > 65536u ||
+        m->hdr.vocab == 0 || m->hdr.vocab > 65535u) return -14;
+    /* 非法 eps/theta 会让 rmsnorm/rope 产生 NaN/Inf，必须在加载期拒绝。 */
+    if (!isfinite(m->hdr.rms_eps) || m->hdr.rms_eps <= 0.0f) return -14;
+    if (!isfinite(m->hdr.rope_theta) || m->hdr.rope_theta <= 1.0f) return -14;
     if (size < K_HEADER_BYTES + (size_t)m->hdr.n_tensors * K_DIRENT_BYTES) return -4;
     /* directory entries are packed at 68 bytes each: name[32], dtype, shape[4], offset, nbytes */
     for (uint32_t i = 0; i < m->hdr.n_tensors; i++) {
@@ -128,6 +139,27 @@ static const char *const kLayerTensorNames[11] = {
             if (tt == NULL) {
                 printf("missing tensor %s\n", buf);
                 return -7;
+            }
+            /* 目录项自身“nbytes 与 shape 自洽”不代表满足推理消费尺寸：
+             * 例如 norm 只存 1 个 fp16 也能过上面的校验，但 rmsnorm 会按
+             * hidden 读完整段。这里逐项绑定到 header 的实际尺寸。 */
+            uint32_t d0 = m->hdr.hidden, d1 = 0;
+            int two = 0;
+            switch (k) {
+            case 2: case 3: case 4: case 5:
+                d1 = m->hdr.hidden; two = 1; break;
+            case 6: case 7:
+                d0 = m->hdr.head_dim; break;
+            case 8: case 9:
+                d0 = m->hdr.ffn; d1 = m->hdr.hidden; two = 1; break;
+            case 10:
+                d0 = m->hdr.hidden; d1 = m->hdr.ffn; two = 1; break;
+            default: break;                     /* 0/1: attn_norm/ffn_norm */
+            }
+            if (tt->shape[0] != d0 || (two ? tt->shape[1] != d1 : tt->shape[1] != 0u)) {
+                printf("bad tensor shape %s (got %u x %u)\n", buf,
+                       (unsigned)tt->shape[0], (unsigned)tt->shape[1]);
+                return -16;
             }
             slots[k] = ptr_of(m, tt);
             dts[k] = tt->dtype;

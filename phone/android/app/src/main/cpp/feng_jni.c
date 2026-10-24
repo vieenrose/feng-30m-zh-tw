@@ -10,6 +10,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,10 +37,14 @@ typedef struct {
     int ctx;
     int nl_id;
     int abort_flag;
-    int lock_inited;
+    int closing;
     char mem_path[512];     /* 持久化记忆：模型目录下的 mem.txt */
-    pthread_mutex_t lock;
 } jni_session;
+
+/* 引擎是进程级单例（scores / tokenizer 缓冲 / 线程池都是全局的），
+ * 每会话一把锁保护不了它：两个句柄会同时写同一份全局状态。
+ * 这里用进程级互斥，所有 native 入口串行。 */
+static pthread_mutex_t g_engine_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* 记忆持久化：与板端 NVS 共用 feng_mem_export/import 的文本格式。
  * 调用方一般已持有 lock；读写失败只记日志，不影响对话。 */
@@ -52,7 +57,9 @@ static void mem_store_load(jni_session *s)
     const size_t n = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
     buf[n] = 0;
-    if (!feng_mem_import(buf))
+    if (feng_mem_import(buf))
+        feng_mem_mark_clean();          /* 刚读进来的不算“待保存变更” */
+    else
         LOGI("mem.txt 为空或解析失败，已忽略");
 }
 
@@ -62,11 +69,15 @@ static void mem_store_save(jni_session *s)
     char buf[1024];
     const int n = feng_mem_export(buf, sizeof(buf));
     if (n < 0) return;
-    if (n == 0) { (void)remove(s->mem_path); return; }
+    if (n == 0) { (void)remove(s->mem_path); feng_mem_mark_clean(); return; }
     FILE *f = fopen(s->mem_path, "wb");
     if (!f) { LOGE("写不了 %s", s->mem_path); return; }
-    fwrite(buf, 1, (size_t)n, f);
-    fclose(f);
+    const size_t w = fwrite(buf, 1, (size_t)n, f);
+    if (fclose(f) != 0 || w != (size_t)n) {
+        LOGE("写 %s 不完整", s->mem_path);
+        return;                          /* 保留 dirty，下次再试 */
+    }
+    feng_mem_mark_clean();
 }
 
 /* 从 model.bin 的绝对路径推出同目录的 mem.txt（Kotlin 把两个模型文件都解包到 filesDir）。 */
@@ -105,6 +116,92 @@ static void call_string(JNIEnv *env, jobject cb, jmethodID mid, const char *s)
     (*env)->DeleteLocalRef(env, js);
 }
 
+/* ---- 原始字节 -> Modified UTF-8 ------------------------------------------
+ * tokenizer 是 byte-level BPE：一个 token 可能只含 UTF-8 字符的一部分。
+ * 旧实现逐 token 调 NewStringUTF，跨 token 的汉字/emoji 会乱码或丢字。
+ * 这里先累积成完整 UTF-8 序列，再转成 JNI 要求的 Modified UTF-8
+ * （NUL 用 C0 80，补充平面用代理对）。 */
+static int u8_need(unsigned char b)
+{
+    if (b < 0x80) return 1;
+    if ((b & 0xE0) == 0xC0) return 2;
+    if ((b & 0xF0) == 0xE0) return 3;
+    if ((b & 0xF8) == 0xF0) return 4;
+    return 0;
+}
+
+/* 返回写入字节数；0 = 非法/截断序列。 */
+static int u8_to_mutf8(const char *s, int n, char *out, int cap)
+{
+    if (n <= 0 || cap <= 0) return 0;
+    const unsigned char b0 = (unsigned char)s[0];
+    uint32_t cp;
+    int need = u8_need(b0);
+    if (need <= 0 || n < need) return 0;
+    if (need == 1) cp = b0;
+    else if (need == 2) cp = ((uint32_t)(b0 & 0x1F) << 6) | ((unsigned char)s[1] & 0x3Fu);
+    else if (need == 3) cp = ((uint32_t)(b0 & 0x0F) << 12) |
+                             ((uint32_t)((unsigned char)s[1] & 0x3F) << 6) |
+                             ((unsigned char)s[2] & 0x3Fu);
+    else cp = ((uint32_t)(b0 & 0x07) << 18) |
+              ((uint32_t)((unsigned char)s[1] & 0x3F) << 12) |
+              ((uint32_t)((unsigned char)s[2] & 0x3F) << 6) |
+              ((unsigned char)s[3] & 0x3Fu);
+    for (int i = 1; i < need; i++)
+        if (((unsigned char)s[i] & 0xC0) != 0x80) return 0;
+    if ((need == 2 && cp < 0x80) || (need == 3 && cp < 0x800) ||
+        (need == 4 && (cp < 0x10000 || cp > 0x10FFFF))) return 0;
+    if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+
+    int o = 0;
+    if (cp == 0) { if (cap < 2) return 0; out[o++] = (char)0xC0; out[o++] = (char)0x80; }
+    else if (cp < 0x80) { if (cap < 1) return 0; out[o++] = (char)cp; }
+    else if (cp < 0x800) {
+        if (cap < 2) return 0;
+        out[o++] = (char)(0xC0 | (cp >> 6));
+        out[o++] = (char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        if (cap < 3) return 0;
+        out[o++] = (char)(0xE0 | (cp >> 12));
+        out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[o++] = (char)(0x80 | (cp & 0x3F));
+    } else {
+        if (cap < 6) return 0;
+        const uint32_t v = cp - 0x10000;
+        const uint32_t hi = 0xD800 + (v >> 10), lo = 0xDC00 + (v & 0x3FF);
+        out[o++] = (char)(0xE0 | (hi >> 12));
+        out[o++] = (char)(0x80 | ((hi >> 6) & 0x3F));
+        out[o++] = (char)(0x80 | (hi & 0x3F));
+        out[o++] = (char)(0xE0 | (lo >> 12));
+        out[o++] = (char)(0x80 | ((lo >> 6) & 0x3F));
+        out[o++] = (char)(0x80 | (lo & 0x3F));
+    }
+    return o;
+}
+
+/* 把一段可能跨字符边界的原始字节交给 Java；不完整序列留到下一次。 */
+typedef struct { char buf[8]; int n; } u8_pending_t;
+
+static void emit_raw(JNIEnv *env, jobject cb, jmethodID mid,
+                     u8_pending_t *p, const char *s, int n)
+{
+    for (int i = 0; i < n; i++) {
+        if (p->n >= (int)sizeof(p->buf)) { p->n = 0; }   /* 病态输入：丢弃 */
+        p->buf[p->n++] = s[i];
+        for (;;) {
+            if (p->n <= 0) break;
+            const int need = u8_need((unsigned char)p->buf[0]);
+            if (need <= 0) { memmove(p->buf, p->buf + 1, (size_t)--p->n); continue; }
+            if (p->n < need) break;
+            char m[8];
+            const int mlen = u8_to_mutf8(p->buf, p->n, m, (int)sizeof(m));
+            if (mlen > 0) { m[mlen] = 0; call_string(env, cb, mid, m); }
+            memmove(p->buf, p->buf + need, (size_t)(p->n - need));
+            p->n -= need;
+        }
+    }
+}
+
 /* 一轮问答：tool 优先（算式 → 记忆 → 时间 → 随机数，与固件/PC 同序），否则走模型。
  * 返回生成的 token 数；-1 表示参数错误。 */
 JNIEXPORT jint JNICALL
@@ -123,7 +220,12 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
     jmethodID midDone = cbCls ? (*env)->GetMethodID(env, cbCls, "onDone", "(IJ)V") : NULL;
     if (cbCls) (*env)->DeleteLocalRef(env, cbCls);
 
-    pthread_mutex_lock(&s->lock);
+    pthread_mutex_lock(&g_engine_lock);
+    if (s->closing) {
+        pthread_mutex_unlock(&g_engine_lock);
+        (*env)->ReleaseStringUTFChars(env, jtext, text);
+        return -1;
+    }
     s->abort_flag = 0;
 
     char reply[512];
@@ -133,7 +235,7 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
     if (feng_tok_has_special(text)) {
         call_string(env, callback, midToken, "输入包含保留的对话模板标记，已拒绝");
         if (midDone) (*env)->CallVoidMethod(env, callback, midDone, (jint)0, (jlong)0);
-        pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&g_engine_lock);
         (*env)->ReleaseStringUTFChars(env, jtext, text);
         return 0;
     }
@@ -144,27 +246,37 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
         feng_time_answer(text, reply, sizeof(reply)) ||
         feng_random_answer(text, reply, sizeof(reply))) {
         /* tool 秒回：一次回调交完，gen 记 0 让界面知道这不是模型生成的 */
-        if (learned || strstr(text, "忘")) mem_store_save(s);
+        if (learned || feng_mem_dirty()) mem_store_save(s);
         call_string(env, callback, midToken, reply);
         if (midDone) (*env)->CallVoidMethod(env, callback, midDone, (jint)0, (jlong)0);
-        pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&g_engine_lock);
         (*env)->ReleaseStringUTFChars(env, jtext, text);
         return 0;
     }
 
     const int v = s->m.hdr.vocab;
     char prompt[4096];
-    snprintf(prompt, sizeof(prompt),
-             "<|im_start|>user\n%s<|im_end|>\n<|im_start|>assistant\n", text);
+    const int pn = snprintf(prompt, sizeof(prompt),
+                            "<|im_start|>user\n%s<|im_end|>\n<|im_start|>assistant\n", text);
+    if (pn < 0 || pn >= (int)sizeof(prompt)) {
+        /* 截断会把 im_end / assistant 模板切掉，生成角色就错了。 */
+        call_string(env, callback, midToken, "输入太长，请分几次说。");
+        if (midDone) (*env)->CallVoidMethod(env, callback, midDone, (jint)0, (jlong)0);
+        pthread_mutex_unlock(&g_engine_lock);
+        (*env)->ReleaseStringUTFChars(env, jtext, text);
+        return 0;
+    }
 
     const int cap = (int)strlen(text) + 64;
     int *ids = (int *)xmalloc(sizeof(int) * (size_t)cap);
     const int n = ids ? feng_tok_encode(&s->tok, prompt, ids, cap) : 0;
     if (!ids || n <= 0 || n + maxNew + 2 > s->ctx) {
         free(ids);
-        pthread_mutex_unlock(&s->lock);
+        call_string(env, callback, midToken, "这轮输入超出了当前上下文，请缩短或先清空。");
+        if (midDone) (*env)->CallVoidMethod(env, callback, midDone, (jint)0, (jlong)0);
+        pthread_mutex_unlock(&g_engine_lock);
         (*env)->ReleaseStringUTFChars(env, jtext, text);
-        return -1;
+        return 0;
     }
     if (s->kv.len > 0 && s->kv.len + n + maxNew + 2 > s->ctx) {
         s->kv.len = 0;                 /* 上下文满：自动开新对话（与 CLI 同口径） */
@@ -184,6 +296,7 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
 
     int hist[64];
     int nhist = 0;
+    u8_pending_t pend = {{0}, 0};
     int gen_cap = maxNew;
     if (gen_cap > s->ctx - pos - 2) gen_cap = s->ctx - pos - 2;
     for (int step = 0; step < gen_cap && logits; step++) {
@@ -192,10 +305,8 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
         if (tk < 0 || tk == s->tok.id_im_end || tk == s->tok.id_eot) break;
         char b[128];
         const int nb = feng_tok_decode_token(&s->tok, tk, b, sizeof(b));
-        if (nb > 0 && nb < (int)sizeof(b)) {
-            b[nb] = 0;
-            call_string(env, callback, midToken, b);   /* 文本由 Kotlin 侧累积 */
-        }
+        if (nb > 0 && nb < (int)sizeof(b))
+            emit_raw(env, callback, midToken, &pend, b, nb);   /* 跨 token 拼完整字符 */
         if (nhist < 64) hist[nhist++] = tk;
         else { memmove(hist, hist + 1, sizeof(hist) - sizeof(hist[0])); hist[63] = tk; }
         logits = feng_forward(&s->m, &s->kv, &s->ws, tk, pos++);
@@ -217,8 +328,8 @@ Java_com_feng_feng30m_FengNative_nativeAsk(JNIEnv *env, jclass cls, jlong handle
 
     if (midDone) (*env)->CallVoidMethod(env, callback, midDone, (jint)gen, (jlong)(dec_ms + 0.5));
 
-    if (learned || strstr(text, "忘")) mem_store_save(s);
-    pthread_mutex_unlock(&s->lock);
+    if (learned || feng_mem_dirty()) mem_store_save(s);
+    pthread_mutex_unlock(&g_engine_lock);
     (*env)->ReleaseStringUTFChars(env, jtext, text);
     return (jint)gen;
 }
@@ -237,11 +348,11 @@ Java_com_feng_feng30m_FengNative_nativeReset(JNIEnv *env, jclass cls, jlong hand
     (void)env; (void)cls;
     jni_session *s = (jni_session *)(intptr_t)handle;
     if (!s) return;
-    pthread_mutex_lock(&s->lock);
+    pthread_mutex_lock(&g_engine_lock);
     s->kv.len = 0;
     feng_mem_clear();
     mem_store_save(s);
-    pthread_mutex_unlock(&s->lock);
+    pthread_mutex_unlock(&g_engine_lock);
 }
 
 JNIEXPORT jstring JNICALL
@@ -251,9 +362,9 @@ Java_com_feng_feng30m_FengNative_nativeMemory(JNIEnv *env, jclass cls, jlong han
     jni_session *s = (jni_session *)(intptr_t)handle;
     if (!s) return NULL;
     char snap[256];
-    pthread_mutex_lock(&s->lock);
+    pthread_mutex_lock(&g_engine_lock);
     feng_mem_snapshot(snap, sizeof(snap));
-    pthread_mutex_unlock(&s->lock);
+    pthread_mutex_unlock(&g_engine_lock);
     return (*env)->NewStringUTF(env, snap);
 }
 
@@ -296,7 +407,6 @@ static void session_free(jni_session *s)
     free(s->ws.attn); free(s->ws.proj); free(s->ws.gate); free(s->ws.up);
     free(s->ws.ffn); free(s->ws.logits); free(s->ws.scratch);
     feng_tok_free(&s->tok);
-    if (s->lock_inited) pthread_mutex_destroy(&s->lock);
     free(s);
 }
 
@@ -304,7 +414,14 @@ JNIEXPORT void JNICALL
 Java_com_feng_feng30m_FengNative_nativeFree(JNIEnv *env, jclass cls, jlong handle)
 {
     (void)env; (void)cls;
-    session_free((jni_session *)(intptr_t)handle);
+    jni_session *s = (jni_session *)(intptr_t)handle;
+    if (!s) return;
+    /* 拿进程锁 = 等在途 ask/reset 结束；置 closing 后不会再接新请求。
+     * 旧实现直接 free，生成中关闭就是 use-after-free。 */
+    pthread_mutex_lock(&g_engine_lock);
+    s->closing = 1;
+    session_free(s);
+    pthread_mutex_unlock(&g_engine_lock);
 }
 
 /* 初始化：加载模型 + tokenizer、分配 KV/workspace、拉起线程池。
@@ -351,11 +468,12 @@ Java_com_feng_feng30m_FengNative_nativeInit(JNIEnv *env, jclass cls, jstring jmo
         LOGE("tokenizer.bin 解析失败"); goto fail;
     }
 
-    const size_t kv_bytes = feng_kv_bytes(&s->m, ctx);
+    const size_t kv_bytes = feng_kv_bytes(&s->m, ctx);      /* 显示用总量 */
+    const size_t kv_data = feng_kv_data_bytes(&s->m, ctx);  /* 单 cache 数据，不含 scale */
     s->kv.ctx = ctx;
     s->kv.len = 0;
-    s->kv.k_cache = xmalloc(kv_bytes / 2 + 64);
-    s->kv.v_cache = xmalloc(kv_bytes / 2 + 64);
+    s->kv.k_cache = xmalloc(kv_data + 64);
+    s->kv.v_cache = xmalloc(kv_data + 64);
 #if FENG_KV_INT8 || FENG_KV_Q2
     const size_t n_sc = feng_kv_scale_slots(&s->m, ctx);
     s->kv.k_scale = (uint16_t *)xmalloc(n_sc * 2);
@@ -371,7 +489,7 @@ Java_com_feng_feng30m_FengNative_nativeInit(JNIEnv *env, jclass cls, jstring jmo
     ws->k = (float *)xmalloc(sizeof(float) * h);
     ws->v = (float *)xmalloc(sizeof(float) * h);
     ws->attn = (float *)xmalloc(sizeof(float) * h);
-    ws->proj = (float *)xmalloc(sizeof(float) * ff);
+    ws->proj = (float *)xmalloc(sizeof(float) * h);   /* 输出 hidden，不是 ffn */
     ws->gate = (float *)xmalloc(sizeof(float) * ff);
     ws->up = (float *)xmalloc(sizeof(float) * ff);
     ws->ffn = (float *)xmalloc(sizeof(float) * ff);
@@ -383,15 +501,16 @@ Java_com_feng_feng30m_FengNative_nativeInit(JNIEnv *env, jclass cls, jstring jmo
 #else
     const int scales_ok = 1;      /* fp32/fp16：没有 scale，NULL 是正常的 */
 #endif
+    /* 每个 workspace 指针都要检查：漏一个就会在首轮推理里空指针写。 */
     if (!s->kv.k_cache || !s->kv.v_cache || !scales_ok ||
-        !ws->x || !ws->logits || !ws->scratch) {
+        !ws->x || !ws->xn || !ws->q || !ws->k || !ws->v || !ws->attn ||
+        !ws->proj || !ws->gate || !ws->up || !ws->ffn ||
+        !ws->logits || !ws->scratch) {
         LOGE("内存不足"); goto fail;
     }
 
     { int one = 0; s->nl_id = (feng_tok_encode(&s->tok, "\n", &one, 1) == 1) ? one : 0; }
     mem_store_load(s);
-    pthread_mutex_init(&s->lock, NULL);
-    s->lock_inited = 1;
 
     LOGI("初始化完成：%u 层 / h=%u / vocab=%u ｜ ctx=%d ｜ KV %.2f MB ｜ 线程 %d ｜ NEON %s",
          s->m.hdr.n_layers, s->m.hdr.hidden, s->m.hdr.vocab, ctx,
