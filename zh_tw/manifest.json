@@ -1,0 +1,41 @@
+{
+ "op": "zh-TW native conversion of a zh-CN tied embedding (v3: word rename/swap + char twin transfer + suppression/boost rebalance)",
+ "parent": {
+  "path": "/home/luigi/feng-30m",
+  "model_sha256": "f69fc934fc072912f1fc278b44362fb22418de4fdfc27ca49be4f9e8450cccc0"
+ },
+ "tensor": "model.embed_tokens.weight",
+ "shape": [
+  16384,
+  448
+ ],
+ "dtype": "float32",
+ "role": "tied: embedding AND unembedding (no lm_head; C engine requires the tie)",
+ "shadow_scale_L": 1.0,
+ "rows_written": 6945,
+ "rows_numerically_changed": 6945,
+ "scalars_changed": 3111359,
+ "rows_untouched_bit_identical": 9439,
+ "word_swaps": 671,
+ "word_renames": 2275,
+ "word_leaks": 1207,
+ "char_twin_transfers": 441,
+ "merges_kept": 12685,
+ "merges_dropped": 3439,
+ "knobs": {
+  "WORD_COS_MIN": 0.78,
+  "RENAME_NRM_MIN": 1.05,
+  "ATTEST": true,
+  "ATTEST_ALL": false,
+  "TWIN_STRENGTH": 0.2,
+  "CHAR_TWIN": 0.4,
+  "CHAR_GATE": 0.7,
+  "CHAR_ATTEST": true,
+  "SUPPRESS_L": 0.32,
+  "TRAD_BOOST": 1.1,
+  "TRAD_BOOST_REN": 0.7
+ },
+ "formula": "(1) words: for each Simplified token w with a Traditional spelling c -- if c is an existing token and cos(w,k)>=WORD_COS_MIN, swap the strings and serve c with w's row (k gets w's string, then suppression); if cos < WORD_COS_MIN, k's row keeps TWIN_STRENGTH of w's row; if c is free, rename w to c (needs corpus attestation of c and |E[w]| >= RENAME_NRM_MIN). (2) chars: a Traditional glyph row takes CHAR_TWIN of its Simplified twin's direction at cos >= CHAR_GATE, skipping glyphs the zh-TW corpus never uses. (3) softmax rebalance: ids emitting a Simplified-only glyph go to SUPPRESS_L of their row; ids emitting a genuinely Traditional glyph go to TRAD_BOOST.",
+ "mapping_source": "Unihan kTraditionalVariant/kSimplifiedVariant (glyph sets) + kTotalScore; polysemy by cos over the model's own multi-char tokens; word/glyph attestation by an eval-disjoint zh-TW corpus",
+ "size_bytes": 117730088
+}
