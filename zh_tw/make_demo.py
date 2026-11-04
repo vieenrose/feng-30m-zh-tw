@@ -5,10 +5,30 @@ criterion) are painted red, Traditional-only glyphs teal, with live counters."""
 import json, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = "/tmp/demo"
-SAMP = json.load(open("/tmp/demosamples.json", encoding="utf-8"))
-G = json.load(open("/home/luigi/feng-tw-opt/data/char_graph.json"))
-REF = open("/home/luigi/feng-tw-opt/data/zh_tw_reference.txt", encoding="utf-8").read()
+# Usage:  python make_demo.py [samples.json] [out.gif]
+#
+# samples.json maps each prompt below to {"parent": {"steps": [...]},
+# "zhtw": {"steps": [...]}} where "steps" is the incremental decode (steps[k] =
+# text after k+1 generated tokens). Regenerate it with:
+#
+#   from transformers import AutoModelForCausalLM, AutoTokenizer
+#   for tag, mid in (("parent", "/path/to/feng-30m"), ("zhtw", "Luigi/feng-30m-zh-tw")):
+#       tok = AutoTokenizer.from_pretrained(mid)
+#       net = AutoModelForCausalLM.from_pretrained(mid, trust_remote_code=True,
+#                                                  dtype="float16").eval()
+#       for p in PROMPTS:
+#           ids = tok(p, return_tensors="pt")["input_ids"]
+#           g = net.generate(ids, max_new_tokens=60, do_sample=False,
+#                            pad_token_id=tok.eos_token_id)[0][ids.shape[1]:]
+#           out[p][tag] = {"steps": [tok.decode(g[:k], skip_special_tokens=True)
+#                                    for k in range(1, len(g) + 1)]}
+#
+HERE = os.path.dirname(os.path.abspath(__file__))
+if not os.path.exists(f"{HERE}/data/char_graph.json"):
+    HERE = os.getcwd()
+SAMP = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "demo_samples.json", encoding="utf-8"))
+G = json.load(open(f"{HERE}/data/char_graph.json"))
+REF = open(f"{HERE}/data/zh_tw_reference.txt", encoding="utf-8").read()
 S_EXCL = set(G["s_exclusive"]) - set(c for c in REF if c in G["s_exclusive"])   # harness criterion
 T_EXCL = set(G["t_exclusive"])
 PROMPTS = ["請寫一段關於秋天落葉的文字。", "請介紹故宮的歷史。", "太陽為什麼會東升西落？"]
@@ -102,8 +122,9 @@ for pi, pr in enumerate(PROMPTS):
         frames.append(frame(pi, side, 10 ** 9)); durations.append(700)
     frames.append(frame(pi, "hold", 0)); durations.append(1600)
 pal = [f.convert("P", palette=Image.ADAPTIVE, colors=96) for f in frames]
-pal[0].save(f"{HERE}/demo.gif", save_all=True, append_images=pal[1:], duration=durations,
+OUT = sys.argv[2] if len(sys.argv) > 2 else "demo.gif"
+pal[0].save(OUT, save_all=True, append_images=pal[1:], duration=durations,
             loop=0, optimize=True, disposal=2)
 png = frames[-1].convert("P", palette=Image.ADAPTIVE, colors=128)
-png.save(f"{HERE}/demo.png")
-print("gif bytes", os.path.getsize(f"{HERE}/demo.gif"), "frames", len(frames))
+png.save(os.path.splitext(OUT)[0] + ".png")
+print("gif bytes", os.path.getsize(OUT), "frames", len(frames))
