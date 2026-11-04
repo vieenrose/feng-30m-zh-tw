@@ -415,44 +415,34 @@ To disable the easter egg, enable the `nobonus` build option (`idf.py -DFENG_NO_
 
 ---
 
-## zh-TW variant: `zh_tw/`
+## zh-TW variant — native Traditional Chinese (`zh_tw/`)
 
-This fork carries a **native Traditional-Chinese (zh-TW)** conversion of feng-30m. It is a
-deterministic **weight-space** transform — no fine-tuning, no adapter, no runtime converter.
-Exactly one tensor changes, `model.embed_tokens.weight` (the tied embedding/unembedding), on
-6945 of 16384 rows; every other tensor, the file size, shapes, dtypes and the 16384-token
-vocabulary are unchanged, so the parent's architecture, tied-embedding assumption and
-on-device/C-engine compatibility all survive.
+This fork carries a **native zh-TW** conversion of feng-30m built by **weight-space programming**:
+one tensor changes (`model.embed_tokens.weight`, 6945 of 16384 rows). No fine-tuning, no adapter,
+no runtime converter, no GPU — every other tensor, the file size, shapes, dtypes and the 16384-token
+vocabulary are unchanged, so the tied embedding the on-device engine depends on survives.
 
-Model weights + card: **[hf.co/Luigi/feng-30m-zh-tw](https://huggingface.co/Luigi/feng-30m-zh-tw)**
-(finetune of [`jiaheng0815/feng-30m`](https://huggingface.co/jiaheng0815/feng-30m)).
+![parent (zh-CN) vs feng-30m-zh-tw typing the same prompts](assets/demo.gif)
 
-Perplexity on seven held-out zh-TW domains (1024 tokens each, none used to select any knob):
+Real greedy output, same prompts, unedited. **Red** = Simplified-only glyph, **teal** =
+Traditional-only glyph. Weights + card:
+**[hf.co/Luigi/feng-30m-zh-tw](https://huggingface.co/Luigi/feng-30m-zh-tw)**.
 
-| domain | parent | zh-TW | Δ |
-|---|---|---|---|
-| eval1 · Wikipedia | 202.27 | **169.00** | −16.4% |
-| eval2 · Wikipedia (other) | 313.33 | **212.74** | −32.1% |
-| val3 · fresh articles | 232.19 | **165.69** | −28.6% |
-| val4 · geography/sport | 331.27 | **296.84** | −10.4% |
-| val5 · culture/food | 140.65 | **138.22** | −1.7% |
-| val6 · science/history | 327.29 | **268.01** | −18.1% |
-| val7 · science/medicine | 217.43 | **184.56** | −15.1% |
-| **mean CE, six tuning domains (nats)** | 5.508 | **5.302** | **−3.7%** |
-| zh-CN control | 220.32 | 769.02 | deliberately worse (native shift, not sharpening) |
-| English control | 43.60 | 42.81 | unchanged |
+| | parent | feng-30m-zh-tw |
+|---|---|---|
+| Simplified-only glyphs per 100 Han chars generated | 20.73 | **0.00** |
+| Traditional-only glyphs per 100 Han chars | 0.78 | **4.93** |
+| prompts leaking Simplified glyphs (16-prompt audit) | 13 / 16 | **0 / 16** |
+| mean CE, six held-out zh-TW domains (nats) | 5.508 | **5.302** (−3.7%) |
+| zh-CN control PPL (should get worse) | 220.32 | 769.02 |
+| English control PPL (should not improve) | 43.60 | 42.81 |
 
-Reproduce the artifact from the parent checkpoint:
+Method, the three measurement instruments (held-out CE + purity + anti-gaming controls), the
+primitive instruction set and the ~125 negative results are documented in
+**[`zh_tw/`](zh_tw/)** and in [**ZH_TW.md**](ZH_TW.md).
 
 ```bash
-pip install safetensors numpy tokenizers
-python zh_tw/build_tw.py --base /path/to/feng-30m --out ./feng-30m-zh-tw
+python zh_tw/build_tw.py --base /path/to/feng-30m --out ./feng-30m-zh-tw   # rebuild in ~15 s on CPU
 python zh_tw/eval_ppl.py --model ./feng-30m-zh-tw --text your_zh_tw_text.txt
+python zh_tw/make_demo.py                                                   # regenerate assets/demo.gif
 ```
-
-The program prints its accepted decisions (`word-swaps 671  word-renames 2275  word-leaks 1207
-char-twins 441`) and writes `manifest.json` with the parent SHA-256, every knob value and the
-algebra. See `zh_tw/MODEL_CARD.md` for the method (word rename/swap, exact-twin character row
-transfer, corpus attestation filtering, and a suppression/boost softmax rebalance) and its
-limitations — in particular that the result is deliberately a poor zh-CN model, and that the
-parent's `esp32/` export must be regenerated from the new embedding.
